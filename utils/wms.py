@@ -1,40 +1,94 @@
 # utils/wms.py
 # Funções de comunicação com o serviço WMS do GeoBases e conversão para GeoTIFF.
 # Toda interação com a rede e o formato raster está isolada aqui.
+# Baseado no padrão de conexão do repo downloader-imagens-car (OWSLib + requests).
+#
+# Otimizado com aiohttp para requisições assíncronas de alta performance.
 
 import io
-import time
+import asyncio
 import logging
 from pathlib import Path
 
 import numpy as np
-import requests
+import aiohttp
 import rasterio
 from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 from PIL import Image
+from owslib.wms import WebMapService
+from pyproj import Transformer
 
 logger = logging.getLogger(__name__)
 
+# Cache global da conexão WMS (evita reconectar a cada imagem)
+_conexao_wms = None
 
-def calcular_bbox(x: float, y: float, buffer_metros: float) -> tuple[float, float, float, float]:
+
+def conectar_wms(wms_url: str, wms_versao: str) -> WebMapService:
     """
-    Calcula o bounding box quadrado ao redor de um ponto central.
+    Conecta ao serviço WMS do GeoBases e retorna o objeto de conexão.
+    Usa cache para não reconectar a cada requisição.
+    """
+    global _conexao_wms
+    if _conexao_wms is not None:
+        return _conexao_wms
+
+    logger.info(f"Conectando ao serviço WMS: {wms_url}")
+    _conexao_wms = WebMapService(wms_url, version=wms_versao)
+    total_camadas = len(list(_conexao_wms.contents))
+    logger.info(f"Conectado com sucesso. Camadas disponíveis: {total_camadas}")
+    return _conexao_wms
+
+
+def validar_camada(wms: WebMapService, nome_camada: str) -> bool:
+    """
+    Verifica se a camada existe no serviço WMS.
+    """
+    return nome_camada in wms.contents
+
+
+# Cache do transformador de coordenadas (evita recriar a cada chamada)
+_transformador_cache = {}
+
+
+def _obter_transformador(srid_entrada: str) -> Transformer:
+    """Retorna transformador de coordenadas com cache."""
+    if srid_entrada not in _transformador_cache:
+        _transformador_cache[srid_entrada] = Transformer.from_crs(
+            srid_entrada, "EPSG:4326", always_xy=True
+        )
+    return _transformador_cache[srid_entrada]
+
+
+def calcular_bbox_latlon(
+    x: float, y: float, buffer_metros: float, srid_entrada: str
+) -> tuple[float, float, float, float]:
+    """
+    Calcula o bounding box em coordenadas geográficas (lat/lon) a partir de
+    um ponto central em UTM.
 
     Parâmetros:
-        x: coordenada X central em metros (EPSG:31984)
-        y: coordenada Y central em metros (EPSG:31984)
+        x: coordenada X central em metros (UTM)
+        y: coordenada Y central em metros (UTM)
         buffer_metros: metade do lado do quadrado em metros
+        srid_entrada: CRS de entrada (ex: "EPSG:31984")
 
     Retorna:
-        Tupla (xmin, ymin, xmax, ymax) em metros
+        Tupla (minx_lon, miny_lat, maxx_lon, maxy_lat) em graus decimais
     """
-    return (
-        x - buffer_metros,
-        y - buffer_metros,
-        x + buffer_metros,
-        y + buffer_metros,
-    )
+    # Bbox em UTM (metros)
+    xmin_utm = x - buffer_metros
+    ymin_utm = y - buffer_metros
+    xmax_utm = x + buffer_metros
+    ymax_utm = y + buffer_metros
+
+    # Converter cantos para lat/lon usando transformador cachado
+    transformador = _obter_transformador(srid_entrada)
+    lon_min, lat_min = transformador.transform(xmin_utm, ymin_utm)
+    lon_max, lat_max = transformador.transform(xmax_utm, ymax_utm)
+
+    return (lon_min, lat_min, lon_max, lat_max)
 
 
 def montar_parametros_wms(
@@ -49,23 +103,30 @@ def montar_parametros_wms(
 ) -> dict:
     """
     Monta o dicionário de parâmetros para uma requisição WMS GetMap.
+
+    IMPORTANTE: WMS 1.3.0 com EPSG:4326 usa ordem lat/lon (invertida).
     """
-    xmin, ymin, xmax, ymax = bbox
+    minx_lon, miny_lat, maxx_lon, maxy_lat = bbox
+
+    # WMS 1.3.0 com EPSG:4326: inverte para lat,lon
+    bbox_str = f"{miny_lat},{minx_lon},{maxy_lat},{maxx_lon}"
+
     return {
-        "SERVICE": "WMS",
-        "VERSION": wms_versao,
-        "REQUEST": "GetMap",
-        "LAYERS": camada,
-        "BBOX": f"{xmin},{ymin},{xmax},{ymax}",
-        "WIDTH": largura_pixels,
-        "HEIGHT": altura_pixels,
-        "SRS": srid,
-        "FORMAT": formato,
-        "TRANSPARENT": transparente,
+        "service": "WMS",
+        "version": wms_versao,
+        "request": "GetMap",
+        "layers": camada,
+        "bbox": bbox_str,
+        "width": largura_pixels,
+        "height": altura_pixels,
+        "crs": srid,
+        "format": formato,
+        "styles": "",
     }
 
 
-def requisitar_imagem_wms(
+async def requisitar_imagem_wms_async(
+    sessao: aiohttp.ClientSession,
     wms_url: str,
     parametros: dict,
     timeout: int,
@@ -73,32 +134,39 @@ def requisitar_imagem_wms(
     pausa_entre_tentativas: int,
 ) -> bytes:
     """
-    Realiza a requisição HTTP ao endpoint WMS e retorna o conteúdo binário da imagem.
-    Em caso de falha de rede, retenta até `tentativas` vezes com pausa entre elas.
-
-    Levanta:
-        RuntimeError se todas as tentativas falharem.
+    Realiza a requisição HTTP assíncrona ao endpoint WMS usando aiohttp.
+    Em caso de falha, retenta até `tentativas` vezes com pausa entre elas.
     """
+    timeout_cfg = aiohttp.ClientTimeout(total=timeout)
+
     for numero_tentativa in range(1, tentativas + 1):
         try:
-            resposta = requests.get(wms_url, params=parametros, timeout=timeout)
-            resposta.raise_for_status()
+            async with sessao.get(
+                wms_url, params=parametros, timeout=timeout_cfg
+            ) as resposta:
+                resposta.raise_for_status()
 
-            # Verificar se o servidor retornou uma imagem (não uma mensagem de erro XML)
-            tipo_conteudo = resposta.headers.get("Content-Type", "")
-            if "xml" in tipo_conteudo or "html" in tipo_conteudo:
-                raise RuntimeError(
-                    f"Servidor retornou erro ao invés de imagem: {resposta.text[:300]}"
-                )
+                # Verificar se o servidor retornou uma imagem
+                tipo_conteudo = resposta.headers.get("Content-Type", "")
+                if "xml" in tipo_conteudo or "text" in tipo_conteudo:
+                    corpo = await resposta.text()
+                    raise RuntimeError(
+                        f"Servidor retornou erro ao invés de imagem: {corpo[:300]}"
+                    )
 
-            return resposta.content
+                return await resposta.read()
 
-        except (requests.RequestException, RuntimeError) as erro:
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout na tentativa {numero_tentativa}/{tentativas}")
+            if numero_tentativa < tentativas:
+                await asyncio.sleep(pausa_entre_tentativas)
+
+        except (aiohttp.ClientError, RuntimeError) as erro:
             logger.warning(
                 f"Tentativa {numero_tentativa}/{tentativas} falhou: {erro}"
             )
             if numero_tentativa < tentativas:
-                time.sleep(pausa_entre_tentativas)
+                await asyncio.sleep(pausa_entre_tentativas)
 
     raise RuntimeError(f"Todas as {tentativas} tentativas falharam para a requisição WMS.")
 
@@ -112,20 +180,7 @@ def salvar_como_geotiff(
     epsg_codigo: int,
 ) -> None:
     """
-    Converte o conteúdo binário recebido do WMS em um GeoTIFF georreferenciado.
-
-    O GeoTIFF resultante contém:
-    - 3 bandas RGB (uint8)
-    - CRS definido pelo epsg_codigo
-    - Transform afim derivado do bbox (posição geográfica real de cada pixel)
-
-    Parâmetros:
-        conteudo_binario: bytes retornados diretamente da resposta HTTP do WMS
-        caminho_saida: caminho completo onde o arquivo .tif será gravado
-        bbox: (xmin, ymin, xmax, ymax) em metros
-        largura_pixels: largura da imagem em pixels (deve ser 1024)
-        altura_pixels: altura da imagem em pixels (deve ser 1024)
-        epsg_codigo: código numérico do CRS (ex: 31984)
+    Converte o conteúdo binário recebido do WMS (PNG) em um GeoTIFF georreferenciado.
     """
     caminho = Path(caminho_saida)
     caminho.parent.mkdir(parents=True, exist_ok=True)
@@ -135,9 +190,8 @@ def salvar_como_geotiff(
     array_imagem = np.array(imagem_pil)  # shape: (altura, largura, 3)
 
     # Calcular a transformação afim a partir do bbox
-    # from_bounds(west, south, east, north, width, height)
-    xmin, ymin, xmax, ymax = bbox
-    transform_afim = from_bounds(xmin, ymin, xmax, ymax, largura_pixels, altura_pixels)
+    minx, miny, maxx, maxy = bbox
+    transform_afim = from_bounds(minx, miny, maxx, maxy, largura_pixels, altura_pixels)
 
     crs = CRS.from_epsg(epsg_codigo)
 
@@ -147,17 +201,20 @@ def salvar_como_geotiff(
         driver="GTiff",
         height=altura_pixels,
         width=largura_pixels,
-        count=3,           # 3 bandas: R, G, B
+        count=3,
         dtype="uint8",
         crs=crs,
         transform=transform_afim,
         compress="lzw",
+        tiled=True,
+        blockxsize=256,
+        blockysize=256,
     ) as dataset_raster:
-        # rasterio espera shape (bandas, altura, largura) — transpor o array numpy
         dataset_raster.write(array_imagem.transpose(2, 0, 1))
 
 
-def baixar_imagem(
+async def baixar_imagem_async(
+    sessao: aiohttp.ClientSession,
     wms_url: str,
     camada: str,
     bbox: tuple[float, float, float, float],
@@ -174,9 +231,8 @@ def baixar_imagem(
     pausa_entre_tentativas: int,
 ) -> None:
     """
-    Função de alto nível: realiza o download completo de uma imagem WMS e a salva
-    como GeoTIFF georreferenciado. Combina montar_parametros_wms,
-    requisitar_imagem_wms e salvar_como_geotiff.
+    Função de alto nível assíncrona: realiza o download completo de uma imagem WMS
+    e a salva como GeoTIFF georreferenciado.
     """
     parametros = montar_parametros_wms(
         camada=camada,
@@ -188,18 +244,23 @@ def baixar_imagem(
         formato=formato,
         transparente=transparente,
     )
-    conteudo = requisitar_imagem_wms(
+    conteudo = await requisitar_imagem_wms_async(
+        sessao=sessao,
         wms_url=wms_url,
         parametros=parametros,
         timeout=timeout,
         tentativas=tentativas,
         pausa_entre_tentativas=pausa_entre_tentativas,
     )
-    salvar_como_geotiff(
-        conteudo_binario=conteudo,
-        caminho_saida=caminho_saida,
-        bbox=bbox,
-        largura_pixels=largura_pixels,
-        altura_pixels=altura_pixels,
-        epsg_codigo=epsg_codigo,
+    # salvar_como_geotiff é CPU-bound (Pillow + rasterio), roda no executor de threads
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        salvar_como_geotiff,
+        conteudo,
+        caminho_saida,
+        bbox,
+        largura_pixels,
+        altura_pixels,
+        epsg_codigo,
     )

@@ -1,6 +1,8 @@
 venv/
 saida/
 logs/
+artifacts/
+arthur/
 __pycache__/
 *.pyc
 .env
