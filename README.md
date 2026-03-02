@@ -64,8 +64,6 @@ projeto-automacao/
 │
 ├── logs/
 │   └── execucao.log                 ← log completo de execução
-│
-└── arthur/                          ← documentação linha-a-linha de cada arquivo
 ```
 
 ---
