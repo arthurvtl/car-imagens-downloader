@@ -2,7 +2,7 @@
 
 ## O que é este projeto?
 
-O IntegraCar é um pipeline automatizado que baixa imagens de satélite e mapas de uso do solo do **GeoBases do Espírito Santo** (IDE GeoBases) para propriedades rurais cadastradas no CAR (Cadastro Ambiental Rural).
+É um pipeline automatizado que baixa imagens de satélite e mapas de uso do solo do **GeoBases do Espírito Santo** (IDE GeoBases) para propriedades rurais cadastradas no CAR (Cadastro Ambiental Rural).
 
 Para cada propriedade listada em um arquivo CSV, o pipeline:
 
