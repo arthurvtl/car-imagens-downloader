@@ -2,76 +2,14 @@
 
 Pipeline automatizado que baixa imagens de satélite e mapas de uso do solo do **GeoBases do Espírito Santo** para propriedades rurais cadastradas no CAR (Cadastro Ambiental Rural).
 
-<<<<<<< HEAD
-É um pipeline automatizado que baixa imagens de satélite e mapas de uso do solo do **GeoBases do Espírito Santo** (IDE GeoBases) para propriedades rurais cadastradas no CAR (Cadastro Ambiental Rural).
-=======
 Para cada coordenada listada em um arquivo CSV, o pipeline produz dois arquivos GeoTIFF georreferenciados:
->>>>>>> ed706eb (Atualizacoes para uso do programa)
 
 - **SATELITE** — ortofotomosaico bruto (KOMPSAT 2019-2020)
 - **SEGMENTADO** — mapa de uso e cobertura do solo (IJSN 2019)
 
 ---
 
-<<<<<<< HEAD
-## Arquitetura do Pipeline
-
-```
-coordenadas_treino_amostra.csv     ← entrada (coordenadas UTM + código do imóvel)
-         │
-         ▼
-   ┌─────────────┐
-   │ extrator.py  │  ← orquestrador principal (asyncio)
-   └──────┬──────┘
-          │
-          │  Para cada amostra (até 4 em paralelo):
-          │
-          ├──► asyncio.gather ──► SEM COR (satélite)   ──► salvar GeoTIFF
-          │                  └──► COM COR (uso solo)   ──► salvar GeoTIFF
-          │
-          ▼
-   ┌──────────────┐
-   │ utils/wms.py │  ← comunicação HTTP (aiohttp) + conversão raster
-   └──────────────┘
-          │
-          ▼
-   GeoBases WMS Server (https://ide.geobases.es.gov.br/geoserver/ows)
-```
-
----
-
-## Estrutura de Arquivos
-
-```
-projeto-automacao/
-├── configuracoes.py                 ← todas as configurações (URLs, camadas, dimensões)
-├── extrator.py                      ← script principal — orquestra o pipeline
-├── coordenadas_treino_amostra.csv   ← CSV de entrada com coordenadas UTM
-├── requirements.txt                 ← dependências Python
-│
-├── utils/
-│   ├── wms.py                       ← funções de download WMS + conversão GeoTIFF
-│   └── manifesto.py                 ← gerenciamento do CSV de manifesto
-│
-├── saida/
-│   ├── SEM COR/                     ← imagens de satélite brutas (.tif)
-│   └── COM COR/                     ← mapas de uso do solo coloridos (.tif)
-│
-├── artifacts/
-│   └── dataset_manifesto.csv        ← registro de cada amostra processada
-│
-├── logs/
-│   └── execucao.log                 ← log completo de execução
-```
-
----
-
-## Como Executar
-
-### 1. Instalar dependências
-=======
 ## Instalação
->>>>>>> ed706eb (Atualizacoes para uso do programa)
 
 ```bash
 git clone <url-do-repositorio>
