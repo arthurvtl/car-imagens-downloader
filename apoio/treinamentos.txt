@@ -1,4 +1,0 @@
-Boas práticas de programação em python
-Codigo em portugues-br
-Evite usar variaveis com nomes muito abreaviados para melhor entendimento
-Faça o codigo de uma forma que ele seja adaptavel, que consigamos alterar com facilidade informacoes como as bases de dados que estamos usando e afins, generalize mas faça bem feito
