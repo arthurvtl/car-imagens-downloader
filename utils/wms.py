@@ -1,9 +1,6 @@
 # utils/wms.py
 # Funções de comunicação com o serviço WMS do GeoBases e conversão para GeoTIFF.
-# Toda interação com a rede e o formato raster está isolada aqui.
-# Baseado no padrão de conexão do repo downloader-imagens-car (OWSLib + requests).
-#
-# Otimizado com aiohttp para requisições assíncronas de alta performance.
+
 
 import io
 import asyncio
@@ -206,9 +203,6 @@ def salvar_como_geotiff(
         crs=crs,
         transform=transform_afim,
         compress="lzw",
-        tiled=True,
-        blockxsize=256,
-        blockysize=256,
     ) as dataset_raster:
         dataset_raster.write(array_imagem.transpose(2, 0, 1))
 

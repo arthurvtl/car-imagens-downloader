@@ -1,6 +1,5 @@
 # utils/manifesto.py
 # Gerencia o arquivo CSV de manifesto do dataset.
-# O manifesto registra cada amostra processada com seu número, status e timestamp.
 
 import csv
 from datetime import datetime

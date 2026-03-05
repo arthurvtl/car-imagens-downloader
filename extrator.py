@@ -1,15 +1,16 @@
 # extrator.py
 # Script principal do pipeline de extração de imagens IntegraCar.
-# Execução: python extrator.py
 #
-# Otimizado para velocidade máxima:
-# - Downloads assíncronos com asyncio + aiohttp (zero overhead de threads)
-# - SEM COR e COM COR baixados simultaneamente via asyncio.gather
-# - Semaphore para limitar concorrência de amostras
-# - GeoTIFF salvo em thread executor (CPU-bound offload)
+# Uso:
+#   python extrator.py --csv coordenadas.csv --caminho ./saida
+#   python extrator.py --csv coordenadas.csv --caminho ./saida --buffer 512 --largura 512 --altura 512 --qtd 500
+#
+# Todos os parâmetros têm valores padrão definidos em configuracoes.py.
 
+import argparse
 import asyncio
 import logging
+import sys
 from pathlib import Path
 
 import aiohttp
@@ -23,6 +24,163 @@ from utils.manifesto import (
 )
 from utils.wms import baixar_imagem_async, calcular_bbox_latlon, conectar_wms, validar_camada
 
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def criar_parser() -> argparse.ArgumentParser:
+    """Define e retorna o parser de argumentos da linha de comando."""
+
+    parser = argparse.ArgumentParser(
+        prog="extrator.py",
+        description=(
+            "Pipeline de extração de imagens georreferenciadas do GeoBases.\n"
+            "Gera dois conjuntos de imagens GeoTIFF a partir de um CSV de coordenadas:\n"
+            "  • SATELITE  — ortofotomosaico (imagem bruta do satélite)\n"
+            "  • SEGMENTADO — mapa de uso e cobertura do solo\n\n"
+            "Exemplo rápido:\n"
+            "  python extrator.py --csv coordenadas.csv --caminho ./saida\n\n"
+            "Exemplo completo:\n"
+            "  python extrator.py \\\\\n"
+            "    --csv coordenadas.csv \\\\\n"
+            "    --caminho ./saida \\\\\n"
+            "    --buffer 512 \\\\\n"
+            "    --largura 512 \\\\\n"
+            "    --altura 512 \\\\\n"
+            "    --qtd 1000"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    # --- Entrada obrigatória ---
+    parser.add_argument(
+        "--csv",
+        metavar="ARQUIVO",
+        required=True,
+        help=(
+            "Caminho para o arquivo CSV com as coordenadas.\n"
+            "O arquivo deve conter as colunas: cod_imovel, x, y\n"
+            "separadas por ponto-e-vírgula (;).\n"
+            "Exemplo: coordenadas_treino_amostra.csv"
+        ),
+    )
+
+    # --- Saída obrigatória ---
+    parser.add_argument(
+        "--caminho",
+        metavar="PASTA",
+        required=True,
+        help=(
+            "Pasta de destino das imagens extraídas.\n"
+            "Serão criadas automaticamente duas subpastas:\n"
+            "  • <PASTA>/SATELITE/   — imagens do ortofotomosaico\n"
+            "  • <PASTA>/SEGMENTADO/ — imagens de uso do solo\n"
+            "Exemplo: ./saida  ou  /tmp/imagens"
+        ),
+    )
+
+    # --- Parâmetros de recorte ---
+    parser.add_argument(
+        "--buffer",
+        metavar="METROS",
+        type=int,
+        default=CONFIGURACOES["buffer_metros"],
+        help=(
+            "Buffer em metros ao redor de cada ponto central.\n"
+            "Define metade do lado do quadrado recortado.\n"
+            f"Padrão: {CONFIGURACOES['buffer_metros']} m\n"
+            "Exemplo: --buffer 512"
+        ),
+    )
+
+    parser.add_argument(
+        "--largura",
+        metavar="PIXELS",
+        type=int,
+        default=CONFIGURACOES["largura_pixels"],
+        help=(
+            "Largura da imagem de saída em pixels.\n"
+            f"Padrão: {CONFIGURACOES['largura_pixels']} px\n"
+            "Exemplo: --largura 512"
+        ),
+    )
+
+    parser.add_argument(
+        "--altura",
+        metavar="PIXELS",
+        type=int,
+        default=CONFIGURACOES["altura_pixels"],
+        help=(
+            "Altura da imagem de saída em pixels.\n"
+            f"Padrão: {CONFIGURACOES['altura_pixels']} px\n"
+            "Exemplo: --altura 512"
+        ),
+    )
+
+    # --- Limite de processamento ---
+    parser.add_argument(
+        "--qtd",
+        metavar="N",
+        type=int,
+        default=None,
+        help=(
+            "Número máximo de coordenadas a processar.\n"
+            "Processa sempre as primeiras N linhas do CSV.\n"
+            "Se omitido, processa todas as linhas.\n"
+            "Exemplo: --qtd 1000  (processa apenas as 1000 primeiras)"
+        ),
+    )
+
+    # --- Paralelismo (avançado) ---
+    parser.add_argument(
+        "--workers",
+        metavar="N",
+        type=int,
+        default=CONFIGURACOES["workers_paralelos"],
+        help=(
+            "Número de downloads simultâneos (avançado).\n"
+            f"Padrão: {CONFIGURACOES['workers_paralelos']}\n"
+            "Reduza se tiver erros de timeout ou conexão recusada."
+        ),
+    )
+
+    return parser
+
+
+def validar_args(args: argparse.Namespace) -> None:
+    """Valida os argumentos e encerra com mensagem clara em caso de erro."""
+
+    # CSV
+    csv_path = Path(args.csv)
+    if not csv_path.exists():
+        print(f"\n❌  ERRO: Arquivo CSV não encontrado: {csv_path.resolve()}", file=sys.stderr)
+        print("     Verifique o caminho informado em --csv\n", file=sys.stderr)
+        sys.exit(1)
+    if csv_path.suffix.lower() not in {".csv", ".txt"}:
+        print(f"\n⚠️   AVISO: O arquivo '{csv_path.name}' não tem extensão .csv.", file=sys.stderr)
+        print("     Continuando mesmo assim...\n", file=sys.stderr)
+
+    # Dimensões positivas
+    for nome, valor in [("--buffer", args.buffer), ("--largura", args.largura), ("--altura", args.altura)]:
+        if valor <= 0:
+            print(f"\n❌  ERRO: {nome} deve ser um número inteiro positivo (recebido: {valor})\n", file=sys.stderr)
+            sys.exit(1)
+
+    # Quantidade
+    if args.qtd is not None and args.qtd <= 0:
+        print(f"\n❌  ERRO: --qtd deve ser um número inteiro positivo (recebido: {args.qtd})\n", file=sys.stderr)
+        sys.exit(1)
+
+    # Workers
+    if args.workers <= 0:
+        print(f"\n❌  ERRO: --workers deve ser um número inteiro positivo (recebido: {args.workers})\n", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Pipeline principal
+# ---------------------------------------------------------------------------
 
 def configurar_logging(pasta_logs: str, nome_log: str) -> None:
     """Configura o sistema de logging para gravar em arquivo e exibir no terminal."""
@@ -77,7 +235,7 @@ async def processar_amostra_async(
     configuracoes: dict,
 ) -> dict:
     """
-    Processa uma única amostra: calcula o bbox, baixa SEM COR e COM COR
+    Processa uma única amostra: calcula o bbox, baixa SATELITE e SEGMENTADO
     em paralelo via asyncio.gather, e retorna o resultado.
     """
     async with semaforo:
@@ -87,29 +245,29 @@ async def processar_amostra_async(
         prefixo = cfg["prefixo_arquivo"]
         nome_arquivo = f"{prefixo}_{numero_amostra}.tif"
 
-        pasta_sem_cor = Path(cfg["pasta_saida"]) / cfg["nome_pasta_sem_cor"]
-        pasta_com_cor = Path(cfg["pasta_saida"]) / cfg["nome_pasta_com_cor"]
+        pasta_satelite = Path(cfg["pasta_saida"]) / cfg["nome_pasta_satelite"]
+        pasta_segmentado = Path(cfg["pasta_saida"]) / cfg["nome_pasta_segmentado"]
 
-        caminho_satelite = pasta_sem_cor / nome_arquivo
-        caminho_uso_solo = pasta_com_cor / nome_arquivo
+        caminho_satelite = pasta_satelite / nome_arquivo
+        caminho_segmentado = pasta_segmentado / nome_arquivo
 
         # Calcular bbox em lat/lon
         bbox = calcular_bbox_latlon(x, y, cfg["buffer_metros"], cfg["srid_entrada"])
 
-        # Baixar SEM COR e COM COR em paralelo via asyncio.gather
-        status_satelite, status_uso_solo = await asyncio.gather(
+        # Baixar SATELITE e SEGMENTADO em paralelo
+        status_satelite, status_segmentado = await asyncio.gather(
             _baixar_uma_imagem_async(
                 sessao, cfg, cfg["camada_satelite"], bbox, caminho_satelite
             ),
             _baixar_uma_imagem_async(
-                sessao, cfg, cfg["camada_uso_solo"], bbox, caminho_uso_solo
+                sessao, cfg, cfg["camada_uso_solo"], bbox, caminho_segmentado
             ),
         )
 
         if status_satelite == "ok":
-            logger.info(f"[amostra_{numero_amostra}] SEM COR OK")
-        if status_uso_solo == "ok":
-            logger.info(f"[amostra_{numero_amostra}] COM COR OK")
+            logger.info(f"[amostra_{numero_amostra}] SATELITE OK")
+        if status_segmentado == "ok":
+            logger.info(f"[amostra_{numero_amostra}] SEGMENTADO OK")
 
         return {
             "numero_amostra": numero_amostra,
@@ -118,29 +276,32 @@ async def processar_amostra_async(
             "y": y,
             "bbox": bbox,
             "status_satelite": status_satelite,
-            "status_uso_solo": status_uso_solo,
+            "status_uso_solo": status_segmentado,
         }
 
 
-async def executar_pipeline_async() -> None:
+async def executar_pipeline_async(cfg: dict) -> None:
     """
     Função principal assíncrona do pipeline. Orquestra conexão WMS, leitura do CSV,
     downloads assíncronos com aiohttp e registro no manifesto.
     """
-    cfg = CONFIGURACOES
-
-    configurar_logging(cfg["pasta_logs"], cfg["nome_log"])
+    configurar_logging(CONFIGURACOES["pasta_logs"], CONFIGURACOES["nome_log"])
     logger = logging.getLogger(__name__)
 
     logger.info("=" * 60)
-    logger.info("Iniciando pipeline de extração IntegraCar (modo ASYNC)")
-    logger.info(f"Workers paralelos: {cfg['workers_paralelos']}")
+    logger.info("Iniciando pipeline de extração IntegraCar")
+    logger.info(f"  CSV           : {cfg['arquivo_csv']}")
+    logger.info(f"  Pasta saída   : {cfg['pasta_saida']}")
+    logger.info(f"  Buffer        : {cfg['buffer_metros']} m")
+    logger.info(f"  Dimensões     : {cfg['largura_pixels']} x {cfg['altura_pixels']} px")
+    if cfg.get("limite_amostras"):
+        logger.info(f"  Limite        : primeiras {cfg['limite_amostras']} coordenadas")
+    logger.info(f"  Workers       : {cfg['workers_paralelos']}")
     logger.info("=" * 60)
 
     # ---- Passo 1: Conectar ao serviço WMS do GeoBases ----
     wms = conectar_wms(cfg["wms_url"], cfg["wms_versao"])
 
-    # Validar camadas
     for nome_camada in [cfg["camada_satelite"], cfg["camada_uso_solo"]]:
         if validar_camada(wms, nome_camada):
             logger.info(f"Camada validada: {nome_camada}")
@@ -148,44 +309,41 @@ async def executar_pipeline_async() -> None:
             logger.warning(f"Camada NÃO encontrada: {nome_camada}")
 
     # ---- Passo 2: Inicializar manifesto ----
-    caminho_manifesto = Path(cfg["pasta_artifacts"]) / cfg["nome_manifesto"]
+    caminho_manifesto = Path(CONFIGURACOES["pasta_artifacts"]) / CONFIGURACOES["nome_manifesto"]
     inicializar_manifesto(caminho_manifesto)
 
     # ---- Passo 3: Ler CSV de coordenadas ----
-    dataframe = pd.read_csv(cfg["arquivo_csv"], sep=cfg["separador_csv"])
-    total_amostras = len(dataframe)
-    logger.info(f"CSV carregado: {total_amostras} amostras encontradas")
+    dataframe = pd.read_csv(cfg["arquivo_csv"], sep=CONFIGURACOES["separador_csv"])
+    total_csv = len(dataframe)
+    logger.info(f"CSV carregado: {total_csv} coordenadas encontradas")
 
-    dataframe["numero_amostra"] = range(1, total_amostras + 1)
+    # Aplicar limite de quantidade, se informado
+    limite = cfg.get("limite_amostras")
+    if limite and limite < total_csv:
+        dataframe = dataframe.head(limite)
+        logger.info(f"Processando apenas as primeiras {limite} coordenadas (de {total_csv})")
 
-    dataframe_pendente = dataframe
+    dataframe["numero_amostra"] = range(1, len(dataframe) + 1)
 
-    # ---- Passo 5: Criar pastas de saída ----
-    pasta_sem_cor = Path(cfg["pasta_saida"]) / cfg["nome_pasta_sem_cor"]
-    pasta_com_cor = Path(cfg["pasta_saida"]) / cfg["nome_pasta_com_cor"]
-    pasta_sem_cor.mkdir(parents=True, exist_ok=True)
-    pasta_com_cor.mkdir(parents=True, exist_ok=True)
+    # ---- Passo 4: Criar pastas de saída ----
+    pasta_satelite = Path(cfg["pasta_saida"]) / cfg["nome_pasta_satelite"]
+    pasta_segmentado = Path(cfg["pasta_saida"]) / cfg["nome_pasta_segmentado"]
+    pasta_satelite.mkdir(parents=True, exist_ok=True)
+    pasta_segmentado.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Pasta SATELITE  : {pasta_satelite.resolve()}")
+    logger.info(f"Pasta SEGMENTADO: {pasta_segmentado.resolve()}")
 
-    # ---- Passo 6: Processar amostras de forma assíncrona ----
+    # ---- Passo 5: Processar amostras de forma assíncrona ----
     contagem_sucesso = 0
     contagem_erro = 0
 
-    # Semáforo limita quantas amostras são processadas simultaneamente
     semaforo = asyncio.Semaphore(cfg["workers_paralelos"])
-
-    # Conector TCP com pool de conexões dimensionado para o paralelismo
     conector = aiohttp.TCPConnector(
         limit=cfg["workers_paralelos"] * 2 + 4,
         limit_per_host=cfg["workers_paralelos"] * 2 + 4,
     )
 
     async with aiohttp.ClientSession(connector=conector) as sessao:
-        logger.info(
-            f"Sessão aiohttp criada com pool de "
-            f"{cfg['workers_paralelos'] * 2 + 4} conexões"
-        )
-
-        # Criar todas as tarefas assíncronas
         tarefas = [
             processar_amostra_async(
                 sessao=sessao,
@@ -196,15 +354,13 @@ async def executar_pipeline_async() -> None:
                 y=row["y"],
                 configuracoes=cfg,
             )
-            for _, row in dataframe_pendente.iterrows()
+            for _, row in dataframe.iterrows()
         ]
 
-        # Executar com barra de progresso
-        with tqdm(total=len(tarefas), desc="Baixando imagens", unit="amostra") as barra:
+        with tqdm(total=len(tarefas), desc="Baixando imagens", unit="img") as barra:
             for coroutine in asyncio.as_completed(tarefas):
                 resultado = await coroutine
 
-                # Registrar resultado no manifesto (síncrono, rápido)
                 registrar_resultado(
                     caminho_manifesto=caminho_manifesto,
                     numero_amostra=resultado["numero_amostra"],
@@ -225,11 +381,37 @@ async def executar_pipeline_async() -> None:
 
     logger.info("=" * 60)
     logger.info("Pipeline concluído.")
-    logger.info(f"Pares completos (ok/ok): {contagem_sucesso}")
-    logger.info(f"Com erro: {contagem_erro}")
-    logger.info(f"Manifesto salvo em: {caminho_manifesto}")
+    logger.info(f"  Pares completos (ok/ok) : {contagem_sucesso}")
+    logger.info(f"  Com erro                 : {contagem_erro}")
+    logger.info(f"  Manifesto salvo em       : {caminho_manifesto}")
     logger.info("=" * 60)
 
 
+# ---------------------------------------------------------------------------
+# Entrypoint
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    parser = criar_parser()
+    args = parser.parse_args()
+    validar_args(args)
+
+    # Construir configuração mesclando defaults com argumentos do usuário
+    cfg = dict(CONFIGURACOES)
+    cfg["arquivo_csv"] = args.csv
+    cfg["pasta_saida"] = args.caminho
+    cfg["buffer_metros"] = args.buffer
+    cfg["largura_pixels"] = args.largura
+    cfg["altura_pixels"] = args.altura
+    cfg["workers_paralelos"] = args.workers
+    cfg["limite_amostras"] = args.qtd  # None = sem limite
+
+    # Nomes das pastas de saída (fixos, padronizados)
+    cfg["nome_pasta_satelite"] = "SATELITE"
+    cfg["nome_pasta_segmentado"] = "SEGMENTADO"
+
+    asyncio.run(executar_pipeline_async(cfg))
+
+
 if __name__ == "__main__":
-    asyncio.run(executar_pipeline_async())
+    main()

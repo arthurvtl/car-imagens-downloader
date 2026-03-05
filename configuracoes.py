@@ -1,9 +1,17 @@
 # configuracoes.py
 # Ponto central de configuração do pipeline IntegraCar.
-# Edite este arquivo para adaptar a outras camadas, tamanhos ou bases de dados.
+#
+# ⚠️  Na maioria dos casos você NÃO precisa editar este arquivo.
+#     Use os argumentos da linha de comando em extrator.py:
+#
+#     python extrator.py --csv MEU_ARQUIVO.csv --caminho ./saida
+#     python extrator.py --help
+#
+# Este arquivo contém apenas os valores padrão e configurações
+# que raramente mudam (URLs do servidor, layers WMS, etc.).
 
 CONFIGURACOES = {
-    # --- Fonte de dados ---
+    # --- Fonte de dados WMS ---
     "wms_url": "https://ide.geobases.es.gov.br/geoserver/ows",
     "wms_versao": "1.3.0",
 
@@ -18,30 +26,24 @@ CONFIGURACOES = {
     "srid_wms": "EPSG:4326",          # CRS usado na requisição WMS (lat/lon)
     "epsg_codigo_saida": 4326,        # Código numérico para gravar no GeoTIFF
 
-    # --- Dimensões do recorte ---
-    # buffer_metros define metade do lado do quadrado recortado ao redor do ponto central.
-    # Com buffer=1024 e 2048 pixels → resolução de 1m/pixel (compatível com KOMPSAT ~1m).
-    "buffer_metros": 512,
-    "largura_pixels": 1024,
-    "altura_pixels": 1024,
+    # --- Dimensões padrão do recorte ---
+    # Podem ser sobrescritas via: --buffer, --largura, --altura
+    "buffer_metros": 1024,    # Metade do lado do quadrado em metros
+    "largura_pixels": 1024,   # Largura da imagem de saída
+    "altura_pixels": 1024,    # Altura da imagem de saída
 
     # --- Formato da requisição WMS ---
     "formato_wms": "image/png",      # PNG é mais compatível com WMS do GeoBases
     "transparente": "FALSE",
 
-    # --- Saídas ---
-    # Duas pastas separadas: SEM COR (satélite bruto) e COM COR (uso do solo colorido)
-    "pasta_saida": "saida",
-    "nome_pasta_sem_cor": "SEM COR",
-    "nome_pasta_com_cor": "COM COR",
-    "prefixo_arquivo": "amostra",       # Gera amostra_1.tif, amostra_2.tif, ...
+    # --- Saídas internas (não alteráveis via CLI) ---
+    "prefixo_arquivo": "amostra",        # Gera amostra_1.tif, amostra_2.tif, ...
     "pasta_artifacts": "artifacts",
     "pasta_logs": "logs",
     "nome_manifesto": "dataset_manifesto.csv",
     "nome_log": "execucao.log",
 
-    # --- Entrada ---
-    "arquivo_csv": "coordenadas_treino_amostra.csv",
+    # --- Entrada padrão do CSV ---
     "separador_csv": ";",
 
     # --- Comportamento do pipeline ---
