@@ -51,4 +51,13 @@ CONFIGURACOES = {
     "timeout_requisicao": 60,       # Segundos de timeout por requisição WMS
     "tentativas_por_imagem": 3,     # Número de retentativas em caso de falha de rede
     "pausa_entre_tentativas": 2,    # Segundos de espera entre retentativas
+
+    # --- Processamento offline 2012 ---
+    # URL oficial do shapefile de uso e cobertura vegetal 2012-2015
+    "url_shapefile_2012": "https://one.s3.es.gov.br/pr-geobases-public/MAP_ES_2012_2015/MAP_ES_2012_2015_USO_COBERTURA_VEGETAL_2012-2015.zip",
+    # Pasta temporária onde o ZIP será extraído para o processamento de 2012
+    "pasta_temp_shapefile": "temp_shp_2012",
+
+    # Camada WMS do ortofotomosaico 2012-2015
+    "camada_satelite_2012": "geonode:iema_ortofotomosaico_es_025m_2012-2015",
 }
