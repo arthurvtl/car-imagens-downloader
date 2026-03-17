@@ -1,3 +1,6 @@
+# === Dependências do Pipeline Multi-Satélite IntegraCar ===
+
+# --- Core (legado preservado) ---
 pandas>=2.2.3
 requests>=2.32.3
 aiohttp>=3.9.0
@@ -7,3 +10,14 @@ tqdm>=4.67.1
 Pillow>=11.1.0
 OWSLib>=0.29.3
 pyproj>=3.6.1
+
+# --- Processamento espacial (2012) ---
+geopandas>=0.14.0
+shapely>=2.0.0
+
+# --- STAC (novo) ---
+pystac-client>=0.8.0
+planetary-computer>=1.0.0
+
+# --- Configuração ---
+pyyaml>=6.0.1

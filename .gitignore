@@ -1,8 +1,11 @@
 venv/
 saida/
+saida_*/
 logs/
 artifacts/
 arthur/
+temp_shp_2012/
 __pycache__/
 *.pyc
 .env
+.vscode/

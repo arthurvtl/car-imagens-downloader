@@ -1,0 +1,97 @@
+# config.yaml — Configuração central do pipeline multi-satélite IntegraCar
+# Edite este arquivo para ajustar parâmetros sem modificar código.
+
+general:
+  buffer_metros: 1024
+  largura_pixels: 1024
+  altura_pixels: 1024
+  workers_paralelos: 4
+  timeout_requisicao: 60
+  tentativas_por_imagem: 3
+  pausa_entre_tentativas: 2
+
+coordinates:
+  srid_entrada: "EPSG:31984"
+  epsg_saida: 4326
+
+csv:
+  separador: ";"
+
+wms:
+  url: "https://ide.geobases.es.gov.br/geoserver/ows"
+  versao: "1.3.0"
+  formato: "image/png"
+  transparente: "FALSE"
+
+segmented_layer:
+  camada: "geonode:ijsn_map_uso_solo_es_2019_20200"
+  only_es: true
+
+satellites:
+  kompsat:
+    type: wms
+    camada: "geonode:ijsn-ortofotomosaico-es-kompsat-3-3a-2019-2020"
+    bands:
+      R: { name: "Red", resolution: 0.5, wavelength: "red" }
+      G: { name: "Green", resolution: 0.5, wavelength: "green" }
+      B: { name: "Blue", resolution: 0.5, wavelength: "blue" }
+    default_bands: [R, G, B]
+    description: "KOMPSAT-3/3A ortomosaico RGB (Espírito Santo, via GeoBases WMS)"
+
+  sentinel:
+    type: stac
+    catalog_url: "https://planetarycomputer.microsoft.com/api/stac/v1"
+    collection: "sentinel-2-l2a"
+    needs_signing: true
+    bands:
+      B02: { name: "Blue",   resolution: 10,  wavelength: "490nm"  }
+      B03: { name: "Green",  resolution: 10,  wavelength: "560nm"  }
+      B04: { name: "Red",    resolution: 10,  wavelength: "665nm"  }
+      B08: { name: "NIR",    resolution: 10,  wavelength: "842nm"  }
+      B11: { name: "SWIR-1", resolution: 20,  wavelength: "1610nm" }
+      B12: { name: "SWIR-2", resolution: 20,  wavelength: "2190nm" }
+    default_bands: [B04, B03, B02]
+    description: "Sentinel-2 Level-2A (Planetary Computer STAC)"
+
+  landsat:
+    type: stac
+    catalog_url: "https://planetarycomputer.microsoft.com/api/stac/v1"
+    collection: "landsat-c2-l2"
+    needs_signing: true
+    bands:
+      blue:   { name: "Blue",   resolution: 30,  wavelength: "482nm"   }
+      green:  { name: "Green",  resolution: 30,  wavelength: "562nm"   }
+      red:    { name: "Red",    resolution: 30,  wavelength: "655nm"   }
+      nir08:  { name: "NIR",    resolution: 30,  wavelength: "865nm"   }
+      swir16: { name: "SWIR-1", resolution: 30,  wavelength: "1609nm"  }
+      swir22: { name: "SWIR-2", resolution: 30,  wavelength: "2201nm"  }
+      lwir11: { name: "TIR",    resolution: 100, wavelength: "10895nm" }
+    default_bands: [red, green, blue]
+    description: "Landsat 8/9 Collection 2 Level-2 (Planetary Computer STAC)"
+
+  cbers:
+    type: stac
+    catalog_url: "https://data.inpe.br/bdc/stac/v1"
+    collection: "CBERS4A-WPM-L4-DN"
+    needs_signing: false
+    bands:
+      BAND1: { name: "Blue",  resolution: 2, wavelength: "485nm" }
+      BAND2: { name: "Green", resolution: 2, wavelength: "555nm" }
+      BAND3: { name: "Red",   resolution: 2, wavelength: "660nm" }
+      BAND4: { name: "NIR",   resolution: 2, wavelength: "830nm" }
+    default_bands: [BAND3, BAND2, BAND1]
+    description: "CBERS-4A WPM (catálogo STAC brasileiro — INPE/BDC)"
+
+date_range:
+  start: "2023-01-01"
+  end: "2024-12-31"
+
+cloud_cover:
+  max_percent: 20
+
+output:
+  prefixo_arquivo: "amostra"
+  pasta_artifacts: "artifacts"
+  pasta_logs: "logs"
+  nome_manifesto: "dataset_manifesto.csv"
+  nome_log: "execucao.log"
