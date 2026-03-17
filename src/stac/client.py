@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 _catalog_cache: dict[str, Client] = {}
 
 
+def invalidate_catalog_cache(catalog_url: str | None = None) -> None:
+    """Remove catálogo do cache (ou limpa tudo se url=None)."""
+    if catalog_url is None:
+        _catalog_cache.clear()
+    else:
+        _catalog_cache.pop(catalog_url, None)
+
+
 def get_catalog(
     catalog_url: str,
     needs_signing: bool = False,
@@ -43,8 +51,12 @@ def get_catalog(
                     "Assets do Planetary Computer podem falhar sem assinatura."
                 )
 
-        _catalog_cache[key] = Client.open(catalog_url, modifier=modifier)
-        logger.info(f"Catálogo STAC conectado: {catalog_url}")
+        try:
+            _catalog_cache[key] = Client.open(catalog_url, modifier=modifier)
+            logger.info(f"Catálogo STAC conectado: {catalog_url}")
+        except Exception as e:
+            logger.error(f"Falha ao conectar ao catálogo STAC {catalog_url}: {e}")
+            raise
 
     return _catalog_cache[key]
 
@@ -72,12 +84,16 @@ def search_items(
 
     Retorna lista de pystac.Item ordenada por cloud_cover (menor primeiro).
     """
-    catalog = get_catalog(catalog_url, needs_signing)
-
-    query_params: dict[str, Any] = {}
-    query_params["eo:cloud_cover"] = {"lt": max_cloud_cover}
-
     try:
+        catalog = get_catalog(catalog_url, needs_signing)
+    except Exception:
+        return []
+
+    items: list[pystac.Item] = []
+
+    # Tenta busca com filtro de cloud cover via query
+    try:
+        query_params: dict[str, Any] = {"eo:cloud_cover": {"lt": max_cloud_cover}}
         search = catalog.search(
             collections=[collection],
             bbox=list(bbox),
@@ -87,10 +103,34 @@ def search_items(
         )
         items = list(search.items())
     except Exception as e:
-        logger.error(f"Erro na busca STAC ({collection}): {e}")
-        return []
+        logger.warning(
+            f"Busca STAC com filtro de cloud_cover falhou ({collection}): {e}. "
+            "Tentando sem filtro..."
+        )
+        # Fallback: busca sem query (catálogos como INPE podem não suportar)
+        try:
+            search = catalog.search(
+                collections=[collection],
+                bbox=list(bbox),
+                datetime=datetime_range,
+                max_items=max_items,
+            )
+            items = list(search.items())
+            # Filtra manualmente por cloud cover quando a propriedade existe
+            items = [
+                it for it in items
+                if (it.properties.get("eo:cloud_cover") is None
+                    or it.properties.get("eo:cloud_cover", 0) < max_cloud_cover)
+            ]
+        except Exception as e2:
+            logger.error(f"Erro na busca STAC ({collection}): {e2}")
+            return []
 
-    items.sort(key=lambda it: it.properties.get("eo:cloud_cover", 100))
+    def _cloud_sort_key(it: pystac.Item) -> float:
+        cc = it.properties.get("eo:cloud_cover")
+        return float(cc) if cc is not None else 0.0
+
+    items.sort(key=_cloud_sort_key)
     logger.info(
         f"STAC search: {len(items)} items encontrados para {collection} "
         f"(bbox={bbox}, cloud<{max_cloud_cover}%)"
@@ -125,7 +165,7 @@ def select_best_item(
 ) -> pystac.Item | None:
     """
     Seleciona o melhor item (menor cobertura de nuvens) que contenha
-    todas as bandas requeridas.
+    todas as bandas requeridas. Trata cloud_cover=None como 0 (aceita o item).
     """
     if not items:
         return None
@@ -140,9 +180,10 @@ def select_best_item(
             b in asset_keys or b.lower() in asset_keys_lower
             for b in required_bands
         ):
-            cloud = item.properties.get("eo:cloud_cover", "?")
+            cloud = item.properties.get("eo:cloud_cover")
+            cloud_str = f"{cloud}%" if cloud is not None else "N/A"
             logger.info(
-                f"Melhor item selecionado: {item.id} (cloud={cloud}%)"
+                f"Melhor item selecionado: {item.id} (cloud={cloud_str})"
             )
             return item
 

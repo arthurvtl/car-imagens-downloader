@@ -72,15 +72,16 @@ satellites:
   cbers:
     type: stac
     catalog_url: "https://data.inpe.br/bdc/stac/v1"
-    collection: "CBERS4A-WPM-L4-DN"
+    collection: "CB4A-WPM-L4-DN-1"
     needs_signing: false
     bands:
+      BAND0: { name: "PAN",   resolution: 2, wavelength: "pan" }
       BAND1: { name: "Blue",  resolution: 2, wavelength: "485nm" }
       BAND2: { name: "Green", resolution: 2, wavelength: "555nm" }
       BAND3: { name: "Red",   resolution: 2, wavelength: "660nm" }
       BAND4: { name: "NIR",   resolution: 2, wavelength: "830nm" }
     default_bands: [BAND3, BAND2, BAND1]
-    description: "CBERS-4A WPM (catálogo STAC brasileiro — INPE/BDC)"
+    description: "CBERS-4A WPM Level-4 DN (catálogo STAC brasileiro — INPE/BDC)"
 
 date_range:
   start: "2023-01-01"

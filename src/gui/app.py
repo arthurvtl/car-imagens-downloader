@@ -277,7 +277,14 @@ class IntegraCARApp:
 
     def _update_progress(self, current: int, total: int) -> None:
         def _set():
-            self.progress.configure(mode="determinate", maximum=total, value=current)
+            try:
+                self.progress.stop()
+                if total > 0:
+                    self.progress.configure(
+                        mode="determinate", maximum=max(total, 1), value=current,
+                    )
+            except tk.TclError:
+                pass
         self.root.after(0, _set)
 
     def _start_pipeline(self) -> None:
@@ -292,8 +299,11 @@ class IntegraCARApp:
 
         self.running = True
         self.btn_start.configure(state="disabled")
-        self.progress.configure(mode="indeterminate")
-        self.progress.start(10)
+        try:
+            self.progress.configure(mode="indeterminate")
+            self.progress.start(10)
+        except tk.TclError:
+            pass
         self._update_status("Executando pipeline...")
 
         def worker():
@@ -309,13 +319,23 @@ class IntegraCARApp:
                     f"{result['erro']} erro, {result['total']} total"
                 )
             except Exception as e:
-                self._update_status(f"Erro: {e}")
-                self.root.after(0, lambda: messagebox.showerror("Erro", str(e)))
+                err_msg = str(e)
+                self._update_status(f"Erro: {err_msg}")
+                self.root.after(0, lambda: messagebox.showerror("Erro", err_msg))
             finally:
                 self.running = False
-                self.root.after(0, lambda: self.btn_start.configure(state="normal"))
-                self.root.after(0, lambda: self.progress.stop())
-                self._update_progress(0, 100)
+
+                def _cleanup():
+                    try:
+                        self.progress.stop()
+                        self.progress.configure(
+                            mode="determinate", maximum=100, value=0,
+                        )
+                        self.btn_start.configure(state="normal")
+                    except tk.TclError:
+                        pass
+
+                self.root.after(0, _cleanup)
 
         threading.Thread(target=worker, daemon=True).start()
 

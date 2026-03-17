@@ -130,7 +130,7 @@ async def processar_amostra(
         item_id = ""
         cloud = ""
 
-        if best is None and provider.satellite_type == "stac":
+        if best is None:
             logger.warning(f"[amostra_{numero}] Nenhuma cena encontrada.")
             return {
                 "numero_amostra": numero,
@@ -143,9 +143,10 @@ async def processar_amostra(
                 "cloud_cover": "",
             }
 
-        if best is not None and hasattr(best, "id"):
+        if hasattr(best, "id"):
             item_id = best.id
-            cloud = best.properties.get("eo:cloud_cover", "")
+            cc = best.properties.get("eo:cloud_cover")
+            cloud = cc if cc is not None else ""
 
         assets = provider.get_assets(best)
 
@@ -214,7 +215,7 @@ async def executar_pipeline(
     # Manifesto
     caminho_manifesto = Path(config.pasta_artifacts) / config.nome_manifesto
     inicializar_manifesto(caminho_manifesto)
-    ja_processadas = carregar_amostras_processadas(caminho_manifesto)
+    ja_processadas = carregar_amostras_processadas(caminho_manifesto, config.satellite_name)
 
     # Ler CSV
     df = pd.read_csv(config.arquivo_csv, sep=config.separador_csv)

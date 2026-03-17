@@ -23,13 +23,12 @@ from src.core.config import PipelineConfig, SatelliteConfig
 from src.processing.geotiff import save_geotiff
 from src.processing.raster import read_cog_window
 from src.satellites.base import BaseSatellite
-from src.stac.client import get_asset_url, search_items, select_best_item
+from src.stac.client import get_asset_url, invalidate_catalog_cache, search_items, select_best_item
 
 logger = logging.getLogger(__name__)
 
 CBERS_FALLBACK_CATALOGS = [
     "https://data.inpe.br/bdc/stac/v1",
-    "https://data.inpe.br/stac/v1",
 ]
 
 
@@ -56,14 +55,19 @@ class CbersProvider(BaseSatellite):
             for fallback_url in CBERS_FALLBACK_CATALOGS:
                 if fallback_url == self.sat_config.catalog_url:
                     continue
-                items = search_items(
-                    catalog_url=fallback_url,
-                    collection=self.sat_config.collection,
-                    bbox=bbox,
-                    datetime_range=date_range,
-                    max_cloud_cover=cloud_cover,
-                    needs_signing=False,
-                )
+                try:
+                    items = search_items(
+                        catalog_url=fallback_url,
+                        collection=self.sat_config.collection,
+                        bbox=bbox,
+                        datetime_range=date_range,
+                        max_cloud_cover=cloud_cover,
+                        needs_signing=False,
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Fallback {fallback_url} falhou: {e}")
+                    invalidate_catalog_cache(fallback_url)
+                    continue
                 if items:
                     self.logger.info(f"Fallback bem-sucedido: {fallback_url}")
                     break

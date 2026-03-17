@@ -7,6 +7,7 @@ Evolução de utils/manifesto.py para suportar multi-satélite.
 from __future__ import annotations
 
 import csv
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -29,9 +30,25 @@ COLUNAS_MANIFESTO = [
 
 
 def inicializar_manifesto(caminho: str | Path) -> None:
-    """Cria o manifesto com cabeçalho se não existir."""
+    """
+    Cria o manifesto com cabeçalho se não existir.
+    Se o arquivo já existir com colunas diferentes (legado), renomeia
+    como backup e cria um novo.
+    """
     p = Path(caminho)
     p.parent.mkdir(parents=True, exist_ok=True)
+
+    if p.exists():
+        with open(p, "r", encoding="utf-8") as f:
+            header_line = f.readline().strip()
+        expected_header = ";".join(COLUNAS_MANIFESTO)
+        if header_line and header_line != expected_header:
+            backup = p.with_name(f"{p.stem}_legado{p.suffix}")
+            p.rename(backup)
+            logging.getLogger(__name__).info(
+                f"Manifesto legado renomeado para {backup.name}"
+            )
+
     if not p.exists():
         with open(p, "w", newline="", encoding="utf-8") as f:
             csv.DictWriter(f, fieldnames=COLUNAS_MANIFESTO, delimiter=";").writeheader()
@@ -71,14 +88,26 @@ def registrar_resultado(
         csv.DictWriter(f, fieldnames=COLUNAS_MANIFESTO, delimiter=";").writerow(row)
 
 
-def carregar_amostras_processadas(caminho: str | Path) -> set[int]:
-    """Retorna conjunto de amostras já processadas com sucesso."""
+def carregar_amostras_processadas(
+    caminho: str | Path,
+    satelite: str | None = None,
+) -> set[int]:
+    """
+    Retorna conjunto de amostras já processadas com sucesso.
+    Se `satelite` for informado, filtra apenas registros daquele satélite.
+    """
     p = Path(caminho)
     done: set[int] = set()
     if not p.exists():
         return done
     with open(p, "r", encoding="utf-8") as f:
         for row in csv.DictReader(f, delimiter=";"):
-            if row.get("status_satelite") == "ok":
+            if row.get("status_satelite") != "ok":
+                continue
+            if satelite and row.get("satelite", "") != satelite:
+                continue
+            try:
                 done.add(int(row["numero_amostra"]))
+            except (ValueError, KeyError):
+                continue
     return done
