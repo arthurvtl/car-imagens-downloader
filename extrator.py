@@ -1,9 +1,4 @@
 """
-extrator.py
-Script principal do pipeline de extração de imagens IntegraCar.
-
-Versão com interface gráfica (Tkinter) em vez de argumentos de linha de comando.
-
 A GUI permite:
 - Selecionar o CSV de entrada
 - Escolher a pasta de saída
@@ -48,6 +43,7 @@ from tkinter import ttk, filedialog, messagebox
 # ---------------------------------------------------------------------------
 
 CORES_CLASSES_RGB = {
+    # Nomes padrão do WMS (2019-2020) com as novas cores
     "Afloramento Rochoso": (150, 150, 150),
     "Área Edificada": (251, 154, 153),
     "Brejo": (69, 175, 213),
@@ -73,8 +69,18 @@ CORES_CLASSES_RGB = {
     "Seringueira": (151, 132, 233),
     "Restinga": (63, 231, 161),
     "Solo Exposto": (245, 222, 193),
-}
 
+    # ---> MAPEAMENTO DE NOMES ANTIGOS (SHAPEFILE 2012) <---
+    # Apontando para as mesmas cores novas acima
+    "Mata Nativa em Estágio Inicial de Regeneração": (51, 160, 44),  # Vai para Mata em Regeneração
+    "Cultivo Agrícola - Outros Cultivos Permanentes": (55, 196, 201),
+    "Reflorestamento - Eucalipto": (207, 103, 65),
+    "Cultivo Agrícola - Coco-Da-Baía": (231, 67, 97),  # Diferença no "Da" maiúsculo
+    "Cultivo Agrícola - Cana-De-Açúcar": (209, 163, 117),  # Diferença no "De" maiúsculo
+    "Reflorestamento - Seringueira": (151, 132, 233),
+    "Reflorestamento - Pinus": (243, 184, 129),
+    "Cultivo Agrícola - Outros Cultivos Temporários": (225, 175, 38),
+}
 
 # ---------------------------------------------------------------------------
 # Logging e pipeline principal (mantido do fluxo original)
@@ -685,7 +691,7 @@ class AplicacaoGUI:
         combo_ano = ttk.Combobox(
             frame_principal,
             textvariable=self.ano_var,
-            values=["2012", "2019-2020"],
+            values=["2012-2015", "2019-2020"],
             state="readonly",
             width=15,
         )
@@ -694,7 +700,7 @@ class AplicacaoGUI:
         # Linha 5 - Checkbox Manter Shapefile
         check_manter = ttk.Checkbutton(
             frame_principal,
-            text="Manter Shapefile (Apenas 2012)",
+            text="Manter Shapefile (Apenas 2012-2015)",
             variable=self.manter_shapefile_var,
         )
         check_manter.grid(row=5, column=0, columnspan=2, sticky="w", pady=(5, 5))
@@ -820,7 +826,7 @@ class AplicacaoGUI:
         # Função que roda em thread separada
         def _worker():
             try:
-                if ano == "2012":
+                if ano == "2012-2015":
                     processar_ano_2012(
                         arquivo_csv=caminho_csv,
                         pasta_saida=pasta_saida,
