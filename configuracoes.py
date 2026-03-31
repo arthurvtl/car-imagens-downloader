@@ -1,14 +1,9 @@
 # configuracoes.py
-# Ponto central de configuração do pipeline IntegraCar.
+# Ponto central de configuracao do pipeline IntegraCar.
 #
-# ⚠️  Na maioria dos casos você NÃO precisa editar este arquivo.
-#     Use os argumentos da linha de comando em extrator.py:
-#
-#     python extrator.py --csv MEU_ARQUIVO.csv --caminho ./saida
-#     python extrator.py --help
-#
-# Este arquivo contém apenas os valores padrão e configurações
-# que raramente mudam (URLs do servidor, layers WMS, etc.).
+# Este arquivo contem os valores padrao e configuracoes que raramente mudam
+# (URLs do servidor WMS, layers, SRIDs, dimensoes padrao, etc.).
+# Os valores podem ser sobrescritos pela interface grafica em extrator.py.
 
 CONFIGURACOES = {
     # --- Fonte de dados WMS ---
@@ -26,8 +21,7 @@ CONFIGURACOES = {
     "srid_wms": "EPSG:4326",          # CRS usado na requisição WMS (lat/lon)
     "epsg_codigo_saida": 4326,        # Código numérico para gravar no GeoTIFF
 
-    # --- Dimensões padrão do recorte ---
-    # Podem ser sobrescritas via: --buffer, --largura, --altura
+    # --- Dimensoes padrao do recorte ---
     "buffer_metros": 1024,    # Metade do lado do quadrado em metros
     "largura_pixels": 1024,   # Largura da imagem de saída
     "altura_pixels": 1024,    # Altura da imagem de saída
@@ -36,8 +30,7 @@ CONFIGURACOES = {
     "formato_wms": "image/png",      # PNG é mais compatível com WMS do GeoBases
     "transparente": "FALSE",
 
-    # --- Saídas internas (não alteráveis via CLI) ---
-    "prefixo_arquivo": "amostra",        # Gera amostra_1.tif, amostra_2.tif, ...
+    # --- Saidas internas ---
     "pasta_artifacts": "artifacts",
     "pasta_logs": "logs",
     "nome_manifesto": "dataset_manifesto.csv",

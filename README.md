@@ -1,19 +1,24 @@
-# 🛰️ IntegraCar — Pipeline de Extração de Imagens
+# IntegraCar -- Pipeline de Extracao de Imagens
 
-Pipeline automatizado que baixa imagens de satélite e mapas de uso do solo do **GeoBases do Espírito Santo** para propriedades rurais cadastradas no CAR (Cadastro Ambiental Rural).
+Pipeline automatizado que baixa imagens de satelite e mapas de uso do solo do
+**GeoBases do Espirito Santo** para propriedades rurais cadastradas no CAR
+(Cadastro Ambiental Rural).
 
-Para cada coordenada listada em um arquivo CSV, o pipeline produz dois arquivos GeoTIFF georreferenciados:
+Para cada coordenada listada em um arquivo CSV, o pipeline produz dois arquivos
+GeoTIFF georreferenciados (satelite + uso do solo), em um dos dois periodos:
 
-- **SATELITE** — ortofotomosaico bruto (KOMPSAT 2019-2020)
-- **SEGMENTADO** — mapa de uso e cobertura do solo (IJSN 2019)
+- **2012-2015** -- ortofoto 0,25m (IEMA) + uso do solo rasterizado a partir de shapefile
+- **2019-2020** -- ortofoto KOMPSAT 3/3A (IJSN) + uso do solo via WMS
 
 ---
 
-## Instalação
+## Instalacao
 
 ```bash
 git clone <url-do-repositorio>
 cd projeto-automacao
+python -m venv .venv
+source .venv/bin/activate   # Linux/macOS
 pip install -r requirements.txt
 ```
 
@@ -21,302 +26,143 @@ pip install -r requirements.txt
 
 ## Como Usar
 
+A aplicacao e operada por uma **interface grafica** (Tkinter). Para abrir:
+
 ```bash
-# Forma mais simples (usa todos os defaults)
-python extrator.py --csv coordenadas.csv --caminho ./saida
-
-# Forma completa com todos os parâmetros
-python extrator.py \
-  --csv coordenadas_treino_amostra.csv \
-  --caminho ./saida \
-  --buffer 1024 \
-  --largura 1024 \
-  --altura 1024 \
-  --qtd 1000
-
-# Ver ajuda
-python extrator.py --help
+python extrator.py
 ```
 
-## Parâmetros
+### Campos da interface
 
-| Parâmetro | Obrigatório | Descrição | Padrão |
-|---|---|---|---|
-| `--csv ARQUIVO` | ✅ | CSV com colunas `cod_imovel`, `x`, `y` (separadas por `;`) | — |
-| `--caminho PASTA` | ✅ | Pasta de destino onde serão criadas as subpastas | — |
-| `--buffer METROS` | — | Metade do lado do recorte geográfico em metros | `1024` |
-| `--largura PIXELS` | — | Largura da imagem de saída em pixels | `1024` |
-| `--altura PIXELS` | — | Altura da imagem de saída em pixels | `1024` |
-| `--qtd N` | — | Limita às primeiras N linhas do CSV | todas |
-| `--workers N` | — | Downloads simultâneos em paralelo | `4` |
+| Campo                     | Descricao                                                       |
+|---------------------------|-----------------------------------------------------------------|
+| Arquivo CSV de Entrada    | CSV com colunas `cod_imovel;x;y` (separadas por `;`)           |
+| Pasta de Saida            | Destino das imagens (modo individual)                           |
+| Buffer (metros)           | Metade do lado do recorte geografico em metros (padrao: 1024)   |
+| Quantidade de Imagens     | Limita as primeiras N linhas do CSV (vazio = todas)             |
+| Ano                       | Periodo de processamento: `2012-2015` ou `2019-2020`           |
+| Download simultaneo       | Checkbox que habilita execucao paralela dos dois periodos       |
+| Pasta Saida 12-15         | Destino das imagens 2012-2015 (visivel no modo simultaneo)      |
+| Pasta Saida 19-20         | Destino das imagens 2019-2020 (visivel no modo simultaneo)      |
+| Manter Shapefile          | Preserva o shapefile baixado apos processamento 2012-2015       |
+
+### Modo simultaneo
+
+Ao marcar "Download simultaneo 12-15, 19-20", a interface pede dois caminhos de
+saida (um para cada periodo). O buffer e a quantidade sao compartilhados.
+Os dois pipelines rodam em threads paralelas.
 
 ---
 
-## Estrutura de Saída
+## Estrutura de Saida
+
+### Periodo 2012-2015
 
 ```
-<--caminho>/
-├── SATELITE/
-│   ├── amostra_1.tif
-│   ├── amostra_2.tif
-│   └── ...
-└── SEGMENTADO/
-    ├── amostra_1.tif
-    ├── amostra_2.tif
-    └── ...
+pasta_saida_1215/
+  amostra_1_satelite_2012.tif
+  amostra_1_uso_solo_2012.tif
+  amostra_2_satelite_2012.tif
+  amostra_2_uso_solo_2012.tif
+  ...
+```
 
+### Periodo 2019-2020
+
+```
+pasta_saida_1920/
+  amostra_1_satelite_1920.tif
+  amostra_1_uso_solo_1920.tif
+  amostra_2_satelite_1920.tif
+  amostra_2_uso_solo_1920.tif
+  ...
+```
+
+### Artefatos e logs
+
+```
 artifacts/
-└── dataset_manifesto.csv   ← registro de status de cada download
+  dataset_manifesto.csv       <- registro de status de cada download (19-20)
+  imagens_cheias_12-15.txt    <- amostras 100% pintadas (12-15)
+  imagens_incompletas_12-15.txt <- amostras com pixels faltando (12-15)
 
 logs/
-└── execucao.log            ← log completo da execução
+  execucao.log                <- log completo da execucao
 ```
 
 ---
 
-## Como o Pipeline Funciona — Passo a Passo
+## Como o Pipeline Funciona
 
-O pipeline é composto por **6 etapas sequenciais**, executadas pelo `extrator.py`. As etapas internas de cada download são realizadas de forma paralela e assíncrona.
+### Pipeline 2019-2020
 
----
+| Etapa | Descricao |
+|-------|-----------|
+| 1/4   | Conecta ao servico WMS do GeoBases e valida as camadas |
+| 2/4   | Le o CSV de coordenadas e aplica limite de quantidade |
+| 3/4   | Baixa pares satelite+uso_solo de forma assincrona (aiohttp) |
+| 4/4   | Exibe resumo com totais e tempos |
 
-### Etapa 1 — Leitura do CSV de coordenadas
+Cada coordenada e convertida de EPSG:31984 (UTM 24S) para EPSG:4326 (lat/lon),
+gerando um bounding box que delimita a regiao a recortar. O download das duas
+imagens de cada amostra acontece em paralelo via `asyncio.gather`. O numero de
+workers simultaneos e controlado por um semaforo.
 
-> **Arquivo:** `extrator.py` → função `executar_pipeline_async`
-> **Biblioteca:** `pandas`
+### Pipeline 2012-2015
 
-O pipeline começa lendo o arquivo CSV informado via `--csv`. Esse arquivo contém uma linha por propriedade rural, com o código do imóvel e suas coordenadas geográficas em UTM.
+| Etapa | Descricao |
+|-------|-----------|
+| 1/6   | Baixa o shapefile de uso do solo 2012-2015 (ZIP ~200MB) |
+| 2/6   | Extrai o ZIP em pasta temporaria |
+| 3/6   | Le o CSV de coordenadas |
+| 4/6   | Carrega o shapefile na memoria e reprojeta para EPSG:4326 |
+| 5/6   | Para cada ponto: baixa satelite via WMS + rasteriza uso do solo |
+| 6/6   | Analisa cobertura das imagens e gera relatorios |
 
-```python
-dataframe = pd.read_csv(cfg["arquivo_csv"], sep=";")
-```
+A imagem de uso do solo 2012 nao vem do WMS -- ela e construida rasterizando os
+poligonos do shapefile dentro do bbox de cada amostra, pintando cada classe com
+a cor correspondente da paleta oficial.
 
-A biblioteca **pandas** (`pd.read_csv`) lê o arquivo e transforma cada linha em uma linha de um `DataFrame` — uma estrutura de tabela em memória que permite filtrar, iterar e manipular os dados com eficiência. Se o usuário passou `--qtd 1000`, o `DataFrame` é imediatamente truncado para as 1000 primeiras linhas com `.head(1000)`, antes de qualquer download começar.
-
----
-
-### Etapa 2 — Conversão de coordenadas UTM → Latitude/Longitude
-
-> **Arquivo:** `utils/wms.py` → função `calcular_bbox_latlon`
-> **Biblioteca:** `pyproj`
-
-As coordenadas no CSV estão no sistema **EPSG:31984** (UTM zona 24S, em metros). O servidor WMS do GeoBases, porém, exige as coordenadas em **EPSG:4326** (latitude e longitude em graus decimais).
-
-```python
-transformador = Transformer.from_crs("EPSG:31984", "EPSG:4326", always_xy=True)
-lon_min, lat_min = transformador.transform(xmin_utm, ymin_utm)
-lon_max, lat_max = transformador.transform(xmax_utm, ymax_utm)
-```
-
-A biblioteca **pyproj** realiza essa projeção cartográfica com precisão geodésica. A partir do ponto central `(x, y)` e do buffer em metros, o código cria uma caixa quadrada ao redor do ponto em UTM, e depois converte os quatro cantos dessa caixa para lat/lon — obtendo o **bounding box** (bbox) que delimita a região geográfica a recortar.
-
-O `Transformer` é criado uma única vez e reutilizado em cache para todas as coordenadas, evitando overhead.
+Apos o processamento, o modulo `analisa_img_12_15.py` verifica se cada imagem
+esta 100% pintada (sem pixels pretos) e gera dois relatorios TXT.
 
 ---
 
-### Etapa 3 — Conexão e validação do serviço WMS
+## Saida no Terminal
 
-> **Arquivo:** `utils/wms.py` → funções `conectar_wms` e `validar_camada`
-> **Biblioteca:** `OWSLib`
-
-Antes de qualquer download, o pipeline se conecta ao servidor WMS do GeoBases para verificar se ele está respondendo e se as camadas necessárias existem.
-
-```python
-wms = WebMapService("https://ide.geobases.es.gov.br/geoserver/ows", version="1.3.0")
-```
-
-A biblioteca **OWSLib** implementa o protocolo **OGC WMS** (Web Map Service) — um padrão internacional para servidores de mapas. Com ela, a simples chamada `WebMapService(url)` já faz o handshake com o servidor, baixa o `GetCapabilities` (catálogo de camadas disponíveis) e expõe o resultado em Python.
-
-Depois da conexão, o pipeline verifica se as duas camadas que serão usadas (`camada_satelite` e `camada_uso_solo`) de fato existem no servidor. Se não existirem, um aviso é registrado no log mas a execução continua — pois a validação é feita só via OWSLib, enquanto os downloads usam `aiohttp` diretamente.
-
-A conexão fica em cache global (`_conexao_wms`) para não se repetir a cada imagem.
-
----
-
-### Etapa 4 — Download assíncrono das imagens
-
-> **Arquivo:** `utils/wms.py` → funções `requisitar_imagem_wms_async` e `baixar_imagem_async`
-> **Bibliotecas:** `aiohttp`, `asyncio`
-
-Esta é a etapa mais crítica e complexa do pipeline. Para cada coordenada, o pipeline precisa baixar **duas imagens** (satélite + segmentado), e isso deve acontecer para **centenas ou milhares de coordenadas** — de forma rápida.
-
-A solução usa **programação assíncrona** com `asyncio` e `aiohttp`:
-
-```python
-# Baixar as duas imagens de uma mesma coordenada ao mesmo tempo
-status_satelite, status_segmentado = await asyncio.gather(
-    _baixar_uma_imagem_async(sessao, cfg, cfg["camada_satelite"], bbox, caminho_satelite),
-    _baixar_uma_imagem_async(sessao, cfg, cfg["camada_uso_solo"], bbox, caminho_segmentado),
-)
-```
-
-**Como funciona na prática:**
-
-- **`asyncio`** é o motor de concorrência do Python. Em vez de bloquear o programa enquanto espera a resposta HTTP, ele "pausa" a operação atual e executa outras enquanto aguarda — como um garçom que anota o pedido de uma mesa e já atende a próxima sem esperar a cozinha.
-
-- **`aiohttp`** é o cliente HTTP assíncrono. Ele envia a requisição `GetMap` ao servidor WMS e aguarda a resposta sem travar o processo. Usa um pool de conexões TCP (`TCPConnector`) para reutilizar conexões abertas ao servidor, reduzindo o custo de handshake.
-
-- **`asyncio.Semaphore`** limita quantas coordenadas são processadas ao mesmo tempo (controlado por `--workers`). Isso evita sobrecarregar o servidor do GeoBases com dezenas de requisições simultâneas.
-
-- **`asyncio.gather`** dispara o download do satélite e do segmentado **em paralelo** para a mesma coordenada — as duas requisições viajam ao servidor ao mesmo tempo.
-
-Em caso de falha (timeout, erro HTTP), o código tenta novamente até 3 vezes com pausa de 2 segundos entre tentativas, antes de registrar o erro no manifesto.
-
-A requisição WMS enviada é um `GetMap` com os parâmetros:
+Ambos os pipelines produzem saida padronizada no terminal:
 
 ```
-SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap
-&LAYERS=<nome_da_camada>
-&BBOX=<lat_min,lon_min,lat_max,lon_max>
-&WIDTH=<largura>&HEIGHT=<altura>
-&CRS=EPSG:4326&FORMAT=image/png
-```
-
-> **Atenção WMS 1.3.0:** nesta versão do protocolo, o EPSG:4326 exige que o bbox seja passado na ordem `lat,lon` (invertida em relação ao convencional). O código já trata isso em `montar_parametros_wms`.
-
----
-
-### Etapa 5 — Conversão de PNG para GeoTIFF
-
-> **Arquivo:** `utils/wms.py` → função `salvar_como_geotiff`
-> **Bibliotecas:** `Pillow`, `rasterio`, `numpy`
-
-O servidor WMS retorna as imagens em formato **PNG**. Para que sejam úteis em análises geoespaciais (como segmentação por redes neurais), elas precisam ser convertidas para **GeoTIFF georreferenciado** — um formato que embute as coordenadas geográficas dentro do arquivo.
-
-```python
-# 1. Decodificar o PNG binário em array numérico
-imagem_pil = Image.open(io.BytesIO(conteudo_binario)).convert("RGB")
-array_imagem = np.array(imagem_pil)   # shape: (altura, largura, 3)
-
-# 2. Calcular a transformação afim que mapeia pixels → coordenadas
-transform_afim = from_bounds(lon_min, lat_min, lon_max, lat_max, largura, altura)
-
-# 3. Escrever o GeoTIFF com metadados geoespaciais
-with rasterio.open(caminho, "w", driver="GTiff", crs=CRS.from_epsg(4326),
-                   transform=transform_afim, ...) as dst:
-    dst.write(array_imagem.transpose(2, 0, 1))
-```
-
-Cada biblioteca tem um papel específico:
-
-- **Pillow** (`PIL.Image`) decodifica os bytes binários recebidos do servidor (que estão em formato PNG comprimido) e os converte em uma imagem RGB em memória.
-
-- **numpy** converte a imagem Pillow em um array tridimensional de números inteiros `(altura × largura × 3 canais)`. Esta representação numérica é o que `rasterio` consegue escrever em disco.
-
-- **rasterio** é a biblioteca de referência para I/O de dados raster geoespaciais em Python. Ela escreve o array como um GeoTIFF com:
-  - **CRS** (Sistema de Referência de Coordenadas): `EPSG:4326`
-  - **Transform afim**: matriz que associa cada pixel a uma posição geográfica real
-  - **Compressão LZW**: reduz o tamanho do arquivo sem perda de qualidade
-
-Como a conversão PNG → GeoTIFF é uma operação **CPU-bound** (usa processador, não espera I/O), ela é executada em uma thread separada via `loop.run_in_executor(None, ...)` — para não bloquear o event loop assíncrono enquanto outras imagens estão sendo baixadas.
-
----
-
-### Etapa 6 — Registro no Manifesto
-
-> **Arquivo:** `utils/manifesto.py` → funções `inicializar_manifesto` e `registrar_resultado`
-> **Biblioteca:** `csv` (biblioteca padrão do Python)
-
-Após cada par de imagens ser processado, o resultado é imediatamente registrado no manifesto CSV.
-
-```python
-registrar_resultado(
-    numero_amostra=1,
-    cod_imovel="ES-...",
-    x=..., y=...,
-    bbox=(lon_min, lat_min, lon_max, lat_max),
-    status_satelite="ok",
-    status_uso_solo="ok",
-)
-```
-
-O manifesto é um arquivo CSV em `artifacts/dataset_manifesto.csv` que contém uma linha por coordenada processada, com colunas:
-
-| Coluna | Descrição |
-|---|---|
-| `numero_amostra` | Número sequencial (1, 2, 3, ...) |
-| `cod_imovel` | Código do imóvel no CAR |
-| `x`, `y` | Coordenadas UTM originais |
-| `bbox_xmin/ymin/xmax/ymax` | Bounding box em graus decimais |
-| `status_satelite` | `ok` ou `erro` |
-| `status_uso_solo` | `ok` ou `erro` |
-| `data_download` | Timestamp ISO 8601 do momento do download |
-
-A biblioteca padrão **`csv`** do Python é usada com `DictWriter`, que escreve dicionários diretamente como linhas CSV — uma por vez, em modo append (`"a"`). Isso garante que o manifesto seja atualizado em tempo real: mesmo que o pipeline seja interrompido no meio, as amostras já processadas ficam registradas.
-
----
-
-### Barra de Progresso
-
-> **Biblioteca:** `tqdm`
-
-Durante o processamento, o terminal exibe uma barra de progresso em tempo real:
-
-```
-Baixando imagens:  42%|████████████          | 420/1000 [03:21<04:38,  2.09img/s]
-```
-
-A biblioteca **tqdm** envolve o loop de processamento e atualiza automaticamente a barra a cada imagem concluída, exibindo: percentual, contagem, tempo decorrido, tempo estimado e velocidade (imagens/segundo).
-
----
-
-### Logging
-
-> **Biblioteca:** `logging` (biblioteca padrão do Python)
-
-Paralelamente à barra de progresso, todos os eventos do pipeline são registrados com timestamp no arquivo `logs/execucao.log` e exibidos no terminal:
-
-```
-2025-03-05 14:32:01 [INFO] Conectando ao serviço WMS: https://...
-2025-03-05 14:32:03 [INFO] Camada validada: geonode:ijsn-ortofoto...
-2025-03-05 14:32:03 [INFO] CSV carregado: 3000 coordenadas encontradas
-2025-03-05 14:32:45 [INFO] [amostra_42] SATELITE OK
-2025-03-05 14:32:45 [WARNING] Timeout na tentativa 1/3
-```
-
-A biblioteca padrão **`logging`** do Python usa dois `handlers` simultâneos: um `FileHandler` (grava no arquivo de log) e um `StreamHandler` (exibe no terminal). O nível `INFO` registra o fluxo normal; erros e avisos aparecem em `WARNING` e `ERROR`.
-
----
-
-## Diagrama do Fluxo
-
-```
-coordenadas.csv
-      │
-      ▼
- [pandas] lê o CSV
-      │
-      ▼ para cada coordenada (em paralelo via asyncio.Semaphore)
-      │
-      ├──► [pyproj] converte UTM → lat/lon → calcula bbox
-      │
-      ├──► [aiohttp + asyncio] envia GetMap ao GeoBases WMS
-      │         │                     │
-      │    SATELITE              SEGMENTADO
-      │    (em paralelo via asyncio.gather)
-      │
-      ├──► [Pillow] decodifica PNG → imagem RGB
-      ├──► [numpy] converte imagem → array numérico
-      ├──► [rasterio] grava GeoTIFF georreferenciado
-      │
-      └──► [csv] registra resultado no manifesto
-                    │
-                    ▼
-         [tqdm] atualiza barra de progresso
-         [logging] grava eventos no log
+[ETAPA 1/4] Conectando ao servico WMS (2019-2020)...
+  -> Camada validada: geonode:ijsn-ortofotomosaico-es-kompsat-3-3a-2019-2020
+  -> Camada validada: geonode:ijsn_map_uso_solo_es_2019_20200
+  -> Conexao WMS estabelecida em 2.3s
+[ETAPA 2/4] Lendo CSV de coordenadas...
+  -> 10 coordenadas para processar
+[ETAPA 3/4] Baixando imagens (0/10)...
+  [amostra_1/10] OK em 1.2s (media 1.2s/par -- restante ~11s)
+  [amostra_3/10] OK em 1.5s (media 1.4s/par -- restante ~10s)
+  ...
+============================================================
+  Pares processados: 10/10
+  Pares completos:   10
+  Com erro:          0
+  Tempo total:       15.3s
+  Media por par:     1.53s
+============================================================
 ```
 
 ---
 
 ## Formato do CSV de Entrada
 
-Separador: **ponto-e-vírgula** (`;`)
+Separador: **ponto-e-virgula** (`;`)
 
-| Coluna | Tipo | Descrição |
-|---|---|---|
-| `cod_imovel` | string | Código do imóvel no CAR |
-| `x` | float | Coordenada X em metros (EPSG:31984 — UTM 24S) |
-| `y` | float | Coordenada Y em metros (EPSG:31984) |
+| Coluna       | Tipo   | Descricao                                       |
+|--------------|--------|-------------------------------------------------|
+| `cod_imovel` | string | Codigo do imovel no CAR                         |
+| `x`          | float  | Coordenada X em metros (EPSG:31984 -- UTM 24S)  |
+| `y`          | float  | Coordenada Y em metros (EPSG:31984)             |
 
 ---
 
@@ -324,15 +170,48 @@ Separador: **ponto-e-vírgula** (`;`)
 
 ```
 projeto-automacao/
-├── extrator.py          ← ponto de entrada — CLI e orquestração do pipeline
-├── configuracoes.py     ← configurações internas (URLs WMS, camadas, defaults)
-├── requirements.txt     ← dependências Python
-│
-├── utils/
-│   ├── wms.py           ← download WMS, conversão bbox, geração de GeoTIFF
-│   └── manifesto.py     ← leitura e escrita do CSV de manifesto
-│
-├── artifacts/           ← gerado automaticamente (manifesto)
-├── logs/                ← gerado automaticamente (log de execução)
-└── arthur/              ← documentação técnica linha-a-linha de cada arquivo
+  extrator.py             <- ponto de entrada: GUI + pipelines 2012 e 2019-2020
+  configuracoes.py        <- configuracoes internas (URLs WMS, camadas, defaults)
+  analisa_img_12_15.py    <- analise de cobertura de pixels das imagens 2012-2015
+  requirements.txt        <- dependencias Python
+
+  utils/
+    wms.py                <- download WMS, conversao bbox, geracao de GeoTIFF
+    manifesto.py          <- leitura e escrita do CSV de manifesto
+
+  artifacts/              <- gerado automaticamente (manifesto + relatorios)
+  logs/                   <- gerado automaticamente (log de execucao)
+```
+
+---
+
+## Diagrama do Fluxo
+
+```
+coordenadas.csv
+      |
+      v
+ [pandas] le o CSV
+      |
+      v  para cada coordenada
+      |
+      +---> [pyproj] converte UTM -> lat/lon -> calcula bbox
+      |
+      +---> Pipeline 2019-2020:
+      |       [aiohttp + asyncio] GetMap ao GeoBases WMS
+      |       SATELITE + USO_SOLO em paralelo (asyncio.gather)
+      |       [Pillow] decodifica PNG -> RGB
+      |       [numpy + rasterio] grava GeoTIFF georreferenciado
+      |       [csv] registra resultado no manifesto
+      |
+      +---> Pipeline 2012-2015:
+      |       [requests] baixa shapefile ZIP
+      |       [geopandas] carrega e reprojeta shapefile
+      |       [aiohttp] baixa satelite via WMS
+      |       [rasterio.features] rasteriza uso do solo do shapefile
+      |       [numpy + rasterio] grava GeoTIFF georreferenciado
+      |       [analisa_img_12_15] verifica cobertura de pixels
+      |
+      v
+ [logging] grava eventos no log
 ```

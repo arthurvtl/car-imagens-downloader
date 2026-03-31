@@ -1,167 +1,221 @@
-# 📦 Tecnologias e Bibliotecas
+# Tecnologias e Bibliotecas
 
-Referência das bibliotecas utilizadas no pipeline IntegraCar, com descrição do papel de cada uma no projeto.
+Referencia das bibliotecas utilizadas no pipeline IntegraCar, com descricao do
+papel de cada uma no projeto.
 
 ---
 
 ## pandas
 
-**Versão mínima:** `>= 2.2.3`
-**Instalação:** incluída no `requirements.txt`
+**Versao minima:** `>= 2.2.3`
 
-Biblioteca de análise e manipulação de dados tabulares em Python. No projeto, é usada exclusivamente para **ler o CSV de entrada** com as coordenadas UTM das propriedades rurais.
+Biblioteca de analise e manipulacao de dados tabulares. No projeto, e usada para
+ler o CSV de entrada com as coordenadas UTM das propriedades rurais.
 
-- Lê o arquivo com `pd.read_csv(arquivo, sep=";")` e retorna um `DataFrame`
-- Permite truncar facilmente para as primeiras N linhas (`--qtd`) com `.head(N)`
-- Itera linha a linha com `.iterrows()` para alimentar o pipeline de downloads
-
-**Não é usada para processamento de imagens ou geoespacial** — apenas para carregar e preparar os dados de entrada.
+- Le o arquivo com `pd.read_csv(arquivo, sep=";")` e retorna um `DataFrame`
+- Permite truncar para as primeiras N linhas com `.head(N)`
+- Itera linha a linha com `.iterrows()` para alimentar os pipelines
 
 ---
 
 ## aiohttp
 
-**Versão mínima:** `>= 3.9.0`
+**Versao minima:** `>= 3.9.0`
 
-Cliente HTTP **assíncrono** para Python, baseado em `asyncio`. É a biblioteca responsável por toda a comunicação de rede com o servidor WMS do GeoBases.
+Cliente HTTP assincrono para Python, baseado em `asyncio`. Responsavel por toda
+a comunicacao de rede com o servidor WMS do GeoBases.
 
-- Envia requisições `GET` ao endpoint WMS com os parâmetros do `GetMap`
-- Usa `TCPConnector` com pool de conexões para reutilizar sockets TCP (keep-alive), reduzindo o custo de conexão para cada imagem
-- Configura timeout por requisição (`ClientTimeout`) para evitar que o pipeline fique travado esperando um servidor que não responde
-- Em caso de falha (timeout ou erro HTTP), o pipeline retenta até 3 vezes com pausa entre tentativas
+- Envia requisicoes `GET` ao endpoint WMS com os parametros do `GetMap`
+- Usa `TCPConnector` com pool de conexoes para reutilizar sockets TCP (keep-alive)
+- Configura timeout por requisicao (`ClientTimeout`) para evitar travamentos
+- Em caso de falha, retenta ate 3 vezes com pausa entre tentativas
 
-Trabalha em conjunto com `asyncio` para permitir que múltiplos downloads ocorram simultaneamente sem bloquear o processo.
+Trabalha em conjunto com `asyncio` para permitir downloads simultaneos.
 
 ---
 
 ## asyncio
 
-**Origem:** biblioteca padrão do Python (não requer instalação)
+**Origem:** biblioteca padrao do Python (nao requer instalacao)
 
-Motor de concorrência assíncrona do Python. Permite executar múltiplas operações de I/O (como downloads HTTP) de forma "concorrente" sem usar múltiplas threads ou processos.
+Motor de concorrencia assincrona do Python. Permite executar multiplas operacoes
+de I/O simultaneamente sem usar multiplas threads ou processos.
 
-No projeto:
+| Recurso | Uso no projeto |
+|---------|----------------|
+| `Semaphore` | Limita quantos downloads ocorrem ao mesmo tempo |
+| `gather` | Dispara download do satelite e uso do solo em paralelo para cada amostra |
+| `as_completed` | Processa resultados a medida que ficam prontos |
+| `run_in_executor` | Executa conversao PNG->GeoTIFF (CPU-bound) sem bloquear o event loop |
 
-- **`asyncio.Semaphore`** — limita quantas coordenadas são processadas ao mesmo tempo (controlado por `--workers`). Impede que o pipeline envie centenas de requisições simultâneas ao servidor.
-- **`asyncio.gather`** — dispara o download do satélite e do segmentado de uma mesma coordenada **em paralelo**, aguardando os dois terminarem antes de continuar.
-- **`asyncio.as_completed`** — processa os resultados à medida que ficam prontos, sem esperar que todos terminem para exibir progresso.
-- **`loop.run_in_executor`** — executa a conversão PNG → GeoTIFF (operação CPU-bound) em uma thread separada, sem bloquear o event loop.
+---
+
+## requests
+
+**Versao minima:** `>= 2.32.3`
+
+Cliente HTTP sincrono. Usado no pipeline 2012-2015 para o download do arquivo
+ZIP do shapefile de uso do solo, com suporte a streaming (`stream=True`) para
+acompanhar progresso e nao carregar o arquivo inteiro em memoria.
 
 ---
 
 ## OWSLib
 
-**Versão mínima:** `>= 0.29.3`
+**Versao minima:** `>= 0.29.3`
 
-Biblioteca Python para consumir serviços geoespaciais OGC, incluindo **WMS** (Web Map Service), **WFS** e **WCS**. No projeto, é usada apenas na **fase de inicialização e validação**.
+Biblioteca para consumir servicos geoespaciais OGC (WMS, WFS, WCS). No projeto,
+e usada apenas na fase de inicializacao e validacao.
 
 - Conecta ao servidor WMS via `WebMapService(url, version="1.3.0")`
-- Faz o download automático do `GetCapabilities` — o catálogo de camadas disponíveis no servidor
-- Permite verificar se as camadas usadas (`camada_satelite`, `camada_uso_solo`) existem no servidor, exibindo aviso caso contrário
+- Baixa automaticamente o `GetCapabilities` (catalogo de camadas)
+- Permite verificar se as camadas necessarias existem no servidor
 
-**Não é usada para os downloads em si.** Os downloads das imagens são feitos diretamente com `aiohttp` para permitir comunicação assíncrona, o que OWSLib não suporta.
+Nao e usada para os downloads em si (esses sao feitos com `aiohttp`).
 
 ---
 
 ## pyproj
 
-**Versão mínima:** `>= 3.6.1`
+**Versao minima:** `>= 3.6.1`
 
-Biblioteca de transformações cartográficas e geodésicas, baseada na biblioteca C `PROJ`. É usada para **converter coordenadas** entre sistemas de referência.
+Biblioteca de transformacoes cartograficas, baseada na biblioteca C `PROJ`.
+Converte coordenadas entre sistemas de referencia.
 
-No projeto, converte as coordenadas do CSV de **EPSG:31984** (UTM zona 24S, em metros) para **EPSG:4326** (latitude/longitude em graus decimais), que é o sistema exigido pelo servidor WMS.
+No projeto, converte de **EPSG:31984** (UTM zona 24S, metros) para **EPSG:4326**
+(latitude/longitude, graus decimais), que e o sistema exigido pelo servidor WMS.
 
 - Cria um `Transformer` com `from_crs("EPSG:31984", "EPSG:4326", always_xy=True)`
-- Aplica a transformação nos quatro cantos do bounding box ao redor de cada ponto central
-- O transformador é criado uma única vez e reutilizado em cache para todas as coordenadas
+- Aplica a transformacao nos quatro cantos do bounding box de cada ponto
+- O transformador e criado uma unica vez e reutilizado em cache
 
 ---
 
 ## Pillow
 
-**Versão mínima:** `>= 11.1.0`
+**Versao minima:** `>= 11.1.0`
 
-Biblioteca de processamento de imagens em Python. No pipeline, é usada para **decodificar os bytes PNG** retornados pelo servidor WMS em uma imagem RGB que pode ser manipulada numericamente.
+Biblioteca de processamento de imagens. No pipeline, decodifica os bytes PNG
+retornados pelo servidor WMS em uma imagem RGB manipulavel:
 
 ```python
 imagem_pil = Image.open(io.BytesIO(conteudo_binario)).convert("RGB")
 ```
 
-O conteúdo binário recebido via HTTP é carregado diretamente da memória (sem tocar o disco) usando `io.BytesIO`. Pillow o decodifica e normaliza para 3 canais RGB, independente de como o servidor enviou (RGBA, paleta de cores, etc.).
+O conteudo binario recebido via HTTP e carregado diretamente da memoria usando
+`io.BytesIO`, sem tocar o disco.
 
 ---
 
 ## numpy
 
-**Versão mínima:** `>= 2.2.3`
+**Versao minima:** `>= 2.2.3`
 
-Biblioteca de computação numérica com arrays multidimensionais. No projeto, serve de **ponte entre Pillow e rasterio**.
+Biblioteca de computacao numerica com arrays multidimensionais. Serve de ponte
+entre Pillow e rasterio:
 
 ```python
 array_imagem = np.array(imagem_pil)   # shape: (altura, largura, 3)
 ```
 
-O `rasterio` espera os dados no formato `(bandas, altura, largura)` — o oposto do que Pillow entrega. O numpy faz a transposição do array com `.transpose(2, 0, 1)` antes de gravar o GeoTIFF.
+O `rasterio` espera os dados no formato `(bandas, altura, largura)`. O numpy
+faz a transposicao com `.transpose(2, 0, 1)` antes de gravar o GeoTIFF.
+
+No pipeline 2012-2015, numpy tambem e usado para:
+- Construir o array RGB da imagem de uso do solo a partir da rasterizacao
+- Calcular porcentagem de pixels pintados na analise de cobertura
 
 ---
 
 ## rasterio
 
-**Versão mínima:** `>= 1.4.3`
+**Versao minima:** `>= 1.4.3`
 
-Biblioteca geoespacial de referência para leitura e escrita de dados **raster** (imagens georreferenciadas). No projeto, é responsável por **criar os arquivos GeoTIFF com georreferenciamento**.
+Biblioteca geoespacial de referencia para leitura e escrita de dados raster
+(imagens georreferenciadas). Responsavel por criar os arquivos GeoTIFF.
 
 - Recebe o array numpy com os pixels da imagem
-- Recebe a **transformação afim** (`from_bounds`) — uma matriz que mapeia cada pixel da imagem a uma posição geográfica real no mundo
-- Recebe o **CRS** (`CRS.from_epsg(4326)`) — o sistema de coordenadas embutido no arquivo
-- Grava o arquivo `.tif` com compressão **LZW** (sem perda de qualidade, reduz o tamanho em disco)
+- Recebe a transformacao afim (`from_bounds`) que mapeia pixels a posicoes reais
+- Recebe o CRS (`CRS.from_epsg(4326)`) embutido no arquivo
+- Grava o `.tif` com compressao LZW (sem perda de qualidade)
 
-O resultado é um arquivo que qualquer software GIS (QGIS, ArcGIS, GDAL) consegue abrir já posicionado corretamente no mapa.
-
----
-
-## tqdm
-
-**Versão mínima:** `>= 4.67.1`
-
-Biblioteca de barra de progresso para loops Python. Exibe em tempo real o andamento do pipeline no terminal:
-
-```
-Baixando imagens:  42%|████████        | 420/1000 [03:21<04:38, 2.09img/s]
-```
-
-Mostra: percentual completo, contagem absoluta, tempo decorrido, tempo estimado e velocidade de processamento. Requer apenas envolver o loop com `tqdm(total=N, ...)` e chamar `barra.update(1)` a cada item concluído.
+O submodulo `rasterio.features.rasterize` e usado no pipeline 2012-2015 para
+converter geometrias vetoriais (poligonos do shapefile) em uma grade raster
+com os IDs de cada classe de uso do solo.
 
 ---
 
-## csv + logging + pathlib + datetime
+## geopandas
 
-**Origem:** biblioteca padrão do Python (não requerem instalação)
+**Versao minima:** `>= 1.0.1`
 
-Módulos nativos usados para infra-estrutura do pipeline:
+Extensao do pandas para dados geoespaciais. Usado no pipeline 2012-2015 para:
 
-| Módulo | Uso no projeto |
-|---|---|
-| `csv` (`DictWriter`/`DictReader`) | Lê e escreve o manifesto `dataset_manifesto.csv` linha a linha, em modo append |
-| `logging` | Grava eventos com timestamp em `logs/execucao.log` e exibe no terminal simultaneamente |
-| `pathlib.Path` | Manipula caminhos de arquivos e pastas de forma independente de SO; cria diretórios com `mkdir(parents=True, exist_ok=True)` |
-| `datetime` | Gera o timestamp ISO 8601 registrado no manifesto a cada download concluído |
+- Carregar o shapefile de uso do solo com `gpd.read_file()`
+- Reprojetar para EPSG:4326 com `.to_crs()`
+- Recortar poligonos por bounding box com `.cx[minx:maxx, miny:maxy]`
+
+---
+
+## shapely
+
+**Versao minima:** `>= 2.0.6`
+
+Biblioteca de manipulacao de geometrias planares. Dependencia do geopandas para
+representacao e operacoes sobre poligonos, pontos e linhas.
+
+---
+
+## tkinter
+
+**Origem:** biblioteca padrao do Python (nao requer instalacao)
+
+Framework de interface grafica nativo do Python. Usado para construir a janela
+principal da aplicacao com:
+
+- Campos de entrada (CSV, pasta de saida, buffer, quantidade)
+- Combobox de selecao de ano
+- Checkbox de download simultaneo e manutencao do shapefile
+- Barra de progresso com atualizacao thread-safe
+- Callbacks `root.after()` para atualizacoes seguras a partir de threads
+
+---
+
+## Bibliotecas padrao
+
+Modulos nativos usados para infraestrutura do pipeline:
+
+| Modulo | Uso no projeto |
+|--------|----------------|
+| `csv` (`DictWriter`) | Le e escreve o manifesto `dataset_manifesto.csv` em modo append |
+| `logging` | Grava eventos com timestamp em `logs/execucao.log` e no terminal |
+| `pathlib.Path` | Manipula caminhos de forma independente de SO |
+| `datetime` | Gera timestamp ISO 8601 registrado no manifesto |
+| `threading` | Executa pipelines em threads separadas sem bloquear a GUI |
+| `time` | Mede tempos de cada etapa e calcula estimativas de conclusao |
+| `zipfile` | Extrai o shapefile 2012-2015 do arquivo ZIP baixado |
+| `shutil` | Remove arquivos temporarios (shapefile) apos processamento |
+| `os` | Navegacao em diretorios para localizar o `.shp` dentro do ZIP |
 
 ---
 
 ## Resumo
 
 | Biblioteca | Papel principal |
-|---|---|
+|------------|-----------------|
 | `pandas` | Leitura e filtragem do CSV de coordenadas |
-| `aiohttp` | Requisições HTTP assíncronas ao servidor WMS |
-| `asyncio` | Motor de concorrência: paralelismo de downloads e controle de semáforo |
-| `OWSLib` | Conexão inicial e validação das camadas WMS |
-| `pyproj` | Conversão de coordenadas UTM → lat/lon |
-| `Pillow` | Decodificação de PNG binário em imagem RGB |
-| `numpy` | Ponte numérica entre Pillow e rasterio |
-| `rasterio` | Geração de GeoTIFFs georreferenciados com CRS e transformação afim |
-| `tqdm` | Barra de progresso no terminal |
+| `aiohttp` | Requisicoes HTTP assincronas ao servidor WMS |
+| `asyncio` | Motor de concorrencia: paralelismo de downloads e semaforo |
+| `requests` | Download sincrono do shapefile 2012-2015 (ZIP) |
+| `OWSLib` | Conexao inicial e validacao das camadas WMS |
+| `pyproj` | Conversao de coordenadas UTM -> lat/lon |
+| `Pillow` | Decodificacao de PNG binario em imagem RGB |
+| `numpy` | Ponte numerica entre Pillow e rasterio + analise de pixels |
+| `rasterio` | Geracao de GeoTIFFs georreferenciados + rasterizacao |
+| `geopandas` | Leitura, reprojecao e recorte do shapefile 2012-2015 |
+| `shapely` | Manipulacao de geometrias (dependencia do geopandas) |
+| `tkinter` | Interface grafica da aplicacao |
 | `csv` | Leitura e escrita do manifesto CSV |
 | `logging` | Log com timestamp em arquivo e terminal |
-| `pathlib` | Manipulação de caminhos e criação de pastas |
+| `threading` | Execucao paralela dos pipelines sem bloquear a GUI |
+| `time` | Medicao de tempos e estimativas de conclusao |

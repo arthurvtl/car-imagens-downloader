@@ -1,43 +1,39 @@
 """
-A GUI permite:
-- Selecionar o CSV de entrada
-- Escolher a pasta de saída
-- Definir o buffer em metros e a quantidade de imagens
-- Selecionar o ano de processamento (2012 ou 2019-2020)
-- Opcionalmente manter os arquivos do shapefile temporário (apenas 2012)
+extrator.py
+Pipeline de extracao de imagens de satelite e uso do solo para o IntegraCar.
+
+Suporta dois periodos:
+  - 2012-2015: satelite via WMS + uso do solo rasterizado a partir de shapefile
+  - 2019-2020: satelite + uso do solo via WMS (download assincrono)
+
+Inclui interface grafica (Tkinter) com opcao de download individual ou simultaneo.
 """
 
 import asyncio
 import logging
 import os
+import shutil
 import threading
 import time
+import tkinter as tk
 import zipfile
 from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 
 import aiohttp
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import requests
 import rasterio
+import requests
 from rasterio.crs import CRS
-from rasterio.transform import from_bounds
 from rasterio.features import rasterize
-from shapely.geometry import Point
-from tqdm import tqdm
+from rasterio.transform import from_bounds
 
-from configuracoes import CONFIGURACOES
-from utils.manifesto import (
-    inicializar_manifesto,
-    registrar_resultado,
-)
-from utils.wms import baixar_imagem_async, calcular_bbox_latlon, conectar_wms, validar_camada
 from analisa_img_12_15 import analisar_imagens_uso_solo
-
-import shutil
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from configuracoes import CONFIGURACOES
+from utils.manifesto import inicializar_manifesto, registrar_resultado
+from utils.wms import baixar_imagem_async, calcular_bbox_latlon, conectar_wms, validar_camada
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +81,7 @@ CORES_CLASSES_RGB = {
 }
 
 # ---------------------------------------------------------------------------
-# Logging e pipeline principal (mantido do fluxo original)
+# Logging
 # ---------------------------------------------------------------------------
 
 
@@ -142,12 +138,11 @@ async def processar_amostra_async(
     configuracoes: dict,
 ) -> dict:
     """
-    Processa uma única amostra: calcula o bbox, baixa SATELITE e USO_SOLO
-    em paralelo via asyncio.gather, e retorna o resultado.
-    Ambos os arquivos ficam na mesma pasta de saída.
+    Processa uma unica amostra: calcula o bbox, baixa SATELITE e USO_SOLO
+    em paralelo via asyncio.gather, e retorna o resultado com tempo gasto.
     """
     async with semaforo:
-        logger = logging.getLogger(__name__)
+        t0 = time.time()
         cfg = configuracoes
 
         pasta = Path(cfg["pasta_saida"])
@@ -165,11 +160,6 @@ async def processar_amostra_async(
             ),
         )
 
-        if status_satelite == "ok":
-            logger.info(f"[amostra_{numero_amostra}] SATELITE 1920 OK")
-        if status_uso_solo == "ok":
-            logger.info(f"[amostra_{numero_amostra}] USO_SOLO 1920 OK")
-
         return {
             "numero_amostra": numero_amostra,
             "cod_imovel": cod_imovel,
@@ -178,69 +168,89 @@ async def processar_amostra_async(
             "bbox": bbox,
             "status_satelite": status_satelite,
             "status_uso_solo": status_uso_solo,
+            "tempo": time.time() - t0,
         }
 
 
-async def executar_pipeline_async(cfg: dict) -> None:
+async def executar_pipeline_async(
+    cfg: dict,
+    atualizar_status=None,
+    atualizar_progresso=None,
+) -> None:
     """
-    Função principal assíncrona do pipeline WMS (2019-2020).
-    Orquestra conexão WMS, leitura do CSV, downloads assíncronos com aiohttp
+    Funcao principal assincrona do pipeline WMS (2019-2020).
+    Orquestra conexao WMS, leitura do CSV, downloads assincronos com aiohttp
     e registro no manifesto.
     """
     configurar_logging(CONFIGURACOES["pasta_logs"], CONFIGURACOES["nome_log"])
     logger = logging.getLogger(__name__)
 
-    logger.info("=" * 60)
-    logger.info("Iniciando pipeline de extração IntegraCar (2019-2020)")
-    logger.info(f"  CSV           : {cfg['arquivo_csv']}")
-    logger.info(f"  Pasta saída   : {cfg['pasta_saida']}")
-    logger.info(f"  Buffer        : {cfg['buffer_metros']} m")
-    logger.info(f"  Dimensões     : {cfg['largura_pixels']} x {cfg['altura_pixels']} px")
-    if cfg.get("limite_amostras"):
-        logger.info(f"  Limite        : primeiras {cfg['limite_amostras']} coordenadas")
-    logger.info(f"  Workers       : {cfg['workers_paralelos']}")
-    logger.info("=" * 60)
+    t_pipeline_inicio = time.time()
 
-    # ---- Passo 1: Conectar ao serviço WMS do GeoBases ----
+    def _status(msg: str) -> None:
+        print(msg)
+        if atualizar_status:
+            atualizar_status(msg)
+
+    # ---------------- Conexao WMS ----------------
+    t0 = time.time()
+    _status("[ETAPA 1/4] Conectando ao servico WMS (2019-2020)...")
+
     wms = conectar_wms(cfg["wms_url"], cfg["wms_versao"])
 
     for nome_camada in [cfg["camada_satelite"], cfg["camada_uso_solo"]]:
         if validar_camada(wms, nome_camada):
+            print(f"  -> Camada validada: {nome_camada}")
             logger.info(f"Camada validada: {nome_camada}")
         else:
-            logger.warning(f"Camada NÃO encontrada: {nome_camada}")
+            print(f"  -> Camada NAO encontrada: {nome_camada}")
+            logger.warning(f"Camada NAO encontrada: {nome_camada}")
 
-    # ---- Passo 2: Inicializar manifesto ----
+    print(f"  -> Conexao WMS estabelecida em {time.time() - t0:.1f}s")
+
+    # ---------------- Manifesto ----------------
     caminho_manifesto = (
         Path(CONFIGURACOES["pasta_artifacts"]) / CONFIGURACOES["nome_manifesto"]
     )
     inicializar_manifesto(caminho_manifesto)
 
-    # ---- Passo 3: Ler CSV de coordenadas ----
+    # ---------------- Leitura do CSV ----------------
+    _status("[ETAPA 2/4] Lendo CSV de coordenadas...")
     dataframe = pd.read_csv(
         cfg["arquivo_csv"], sep=CONFIGURACOES["separador_csv"]
     )
     total_csv = len(dataframe)
-    logger.info(f"CSV carregado: {total_csv} coordenadas encontradas")
 
-    # Aplicar limite de quantidade, se informado
     limite = cfg.get("limite_amostras")
     if limite and limite < total_csv:
         dataframe = dataframe.head(limite)
-        logger.info(
-            f"Processando apenas as primeiras {limite} coordenadas (de {total_csv})"
-        )
+        print(f"  -> Limitado as primeiras {limite} coordenadas (de {total_csv})")
+        logger.info(f"Processando primeiras {limite} coordenadas (de {total_csv})")
 
     dataframe["numero_amostra"] = range(1, len(dataframe) + 1)
+    total = len(dataframe)
+    print(f"  -> {total} coordenadas para processar")
 
-    # ---- Passo 4: Criar pasta de saída ----
+    # ---------------- Pasta de saida ----------------
     pasta_saida = Path(cfg["pasta_saida"])
     pasta_saida.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Pasta de saída: {pasta_saida.resolve()}")
 
-    # ---- Passo 5: Processar amostras de forma assíncrona ----
+    # ---------------- Download assincrono ----------------
+    print(f"\n{'='*60}")
+    print(f"  Buffer: {cfg['buffer_metros']}m | Dimensoes: {cfg['largura_pixels']}x{cfg['altura_pixels']}px")
+    print(f"  Workers: {cfg['workers_paralelos']} | Saida: {pasta_saida.resolve()}")
+    print(f"{'='*60}\n")
+
+    msg = f"[ETAPA 3/4] Baixando imagens (0/{total})..."
+    _status(msg)
+    if atualizar_progresso:
+        atualizar_progresso("determinate", value=0, maximum=total)
+
+    t_imagens_inicio = time.time()
     contagem_sucesso = 0
     contagem_erro = 0
+    contagem_processadas = 0
+    tempos_por_amostra: list[float] = []
 
     semaforo = asyncio.Semaphore(cfg["workers_paralelos"])
     conector = aiohttp.TCPConnector(
@@ -262,37 +272,73 @@ async def executar_pipeline_async(cfg: dict) -> None:
             for _, row in dataframe.iterrows()
         ]
 
-        with tqdm(total=len(tarefas), desc="Baixando imagens", unit="img") as barra:
-            for coroutine in asyncio.as_completed(tarefas):
-                resultado = await coroutine
+        for coroutine in asyncio.as_completed(tarefas):
+            resultado = await coroutine
 
-                registrar_resultado(
-                    caminho_manifesto=caminho_manifesto,
-                    numero_amostra=resultado["numero_amostra"],
-                    cod_imovel=resultado["cod_imovel"],
-                    x=resultado["x"],
-                    y=resultado["y"],
-                    bbox=resultado["bbox"],
-                    status_satelite=resultado["status_satelite"],
-                    status_uso_solo=resultado["status_uso_solo"],
+            registrar_resultado(
+                caminho_manifesto=caminho_manifesto,
+                numero_amostra=resultado["numero_amostra"],
+                cod_imovel=resultado["cod_imovel"],
+                x=resultado["x"],
+                y=resultado["y"],
+                bbox=resultado["bbox"],
+                status_satelite=resultado["status_satelite"],
+                status_uso_solo=resultado["status_uso_solo"],
+            )
+
+            contagem_processadas += 1
+            dt = resultado.get("tempo", 0)
+            tempos_por_amostra.append(dt)
+            media = sum(tempos_por_amostra) / len(tempos_por_amostra)
+            restante = (total - contagem_processadas) * media
+
+            par_ok = (
+                resultado["status_satelite"] == "ok"
+                and resultado["status_uso_solo"] == "ok"
+            )
+
+            if par_ok:
+                contagem_sucesso += 1
+                print(
+                    f"  [amostra_{resultado['numero_amostra']}/{total}] OK em {dt:.1f}s "
+                    f"(media {media:.1f}s/par -- restante ~{restante:.0f}s)"
+                )
+            else:
+                contagem_erro += 1
+                print(
+                    f"  [amostra_{resultado['numero_amostra']}/{total}] ERRO em {dt:.1f}s"
                 )
 
-                if (
-                    resultado["status_satelite"] == "ok"
-                    and resultado["status_uso_solo"] == "ok"
-                ):
-                    contagem_sucesso += 1
-                else:
-                    contagem_erro += 1
+            logger.info(
+                f"[1920][amostra_{resultado['numero_amostra']}] "
+                f"sat={resultado['status_satelite']} uso={resultado['status_uso_solo']} "
+                f"em {dt:.1f}s"
+            )
 
-                barra.update(1)
+            if atualizar_progresso:
+                atualizar_progresso("determinate", value=contagem_processadas, maximum=total)
 
-    logger.info("=" * 60)
-    logger.info("Pipeline concluído.")
-    logger.info(f"  Pares completos (ok/ok) : {contagem_sucesso}")
-    logger.info(f"  Com erro                 : {contagem_erro}")
-    logger.info(f"  Manifesto salvo em       : {caminho_manifesto}")
-    logger.info("=" * 60)
+    # ---------------- Resumo ----------------
+    t_imagens_total = time.time() - t_imagens_inicio
+    media_final = t_imagens_total / max(contagem_processadas, 1)
+    t_total = time.time() - t_pipeline_inicio
+
+    print(f"\n{'='*60}")
+    print(f"  Pares processados: {contagem_processadas}/{total}")
+    print(f"  Pares completos:   {contagem_sucesso}")
+    print(f"  Com erro:          {contagem_erro}")
+    print(f"  Tempo total:       {t_total:.1f}s")
+    print(f"  Media por par:     {media_final:.2f}s")
+    print(f"  Manifesto:         {caminho_manifesto}")
+    print(f"{'='*60}\n")
+
+    msg_final = (
+        f"Pipeline 2019-2020 concluido em {t_total:.0f}s "
+        f"({contagem_sucesso} pares OK, {contagem_erro} erros)"
+    )
+    print(msg_final)
+    logger.info(msg_final)
+    _status(msg_final)
 
 
 # ---------------------------------------------------------------------------
@@ -305,21 +351,19 @@ def processar_ano_2019_2020(
     pasta_saida: str,
     buffer_metros: int,
     qtd_imagens: int | None,
+    atualizar_status=None,
+    atualizar_progresso=None,
 ) -> None:
     """
-    Mantém o fluxo original do pipeline WMS (2019-2020), apenas recebendo
-    os parâmetros a partir da interface gráfica.
+    Pipeline WMS (2019-2020), recebendo parametros da interface grafica.
     """
     cfg = dict(CONFIGURACOES)
     cfg["arquivo_csv"] = arquivo_csv
     cfg["pasta_saida"] = pasta_saida
     cfg["buffer_metros"] = buffer_metros
-    cfg["largura_pixels"] = CONFIGURACOES["largura_pixels"]
-    cfg["altura_pixels"] = CONFIGURACOES["altura_pixels"]
-    cfg["workers_paralelos"] = CONFIGURACOES["workers_paralelos"]
-    cfg["limite_amostras"] = qtd_imagens  # None = sem limite
+    cfg["limite_amostras"] = qtd_imagens
 
-    asyncio.run(executar_pipeline_async(cfg))
+    asyncio.run(executar_pipeline_async(cfg, atualizar_status, atualizar_progresso))
 
 
 def processar_ano_2012(
@@ -704,7 +748,6 @@ class AplicacaoGUI:
         """Monta os componentes visuais da janela principal."""
         frame_principal = ttk.Frame(self.root, padding=10)
         frame_principal.grid(row=0, column=0, sticky="nsew")
-        self._frame_principal = frame_principal
 
         # Linha 0 - Arquivo CSV
         ttk.Label(frame_principal, text="Arquivo CSV de Entrada:").grid(
@@ -988,17 +1031,13 @@ class AplicacaoGUI:
         def _executar_2019(pasta_destino: str) -> None:
             """Executa o pipeline 2019-2020."""
             try:
-                self.atualizar_status_threadsafe(
-                    "Executando pipeline WMS (2019-2020)..."
-                )
                 processar_ano_2019_2020(
                     arquivo_csv=caminho_csv,
                     pasta_saida=pasta_destino,
                     buffer_metros=buffer_metros,
                     qtd_imagens=qtd_imagens,
-                )
-                self.atualizar_status_threadsafe(
-                    "Processamento 2019-2020 concluído com sucesso."
+                    atualizar_status=self.atualizar_status_threadsafe,
+                    atualizar_progresso=self.atualizar_progresso_threadsafe,
                 )
             except Exception as exc:
                 mensagem_erro = f"Erro no processamento 2019-2020: {exc}"

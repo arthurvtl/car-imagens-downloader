@@ -33,23 +33,6 @@ def inicializar_manifesto(caminho_manifesto: str | Path) -> None:
             writer.writeheader()
 
 
-def carregar_amostras_processadas(caminho_manifesto: str | Path) -> set[int]:
-    """
-    Lê o manifesto e retorna um conjunto com os números de amostra que já foram
-    processados com status 'ok' em ambas as imagens. Usado para downloads idempotentes.
-    """
-    caminho = Path(caminho_manifesto)
-    amostras_completas = set()
-    if not caminho.exists():
-        return amostras_completas
-    with open(caminho, "r", encoding="utf-8") as arquivo_csv:
-        reader = csv.DictReader(arquivo_csv, delimiter=";")
-        for linha in reader:
-            if linha["status_satelite"] == "ok" and linha["status_uso_solo"] == "ok":
-                amostras_completas.add(int(linha["numero_amostra"]))
-    return amostras_completas
-
-
 def registrar_resultado(
     caminho_manifesto: str | Path,
     numero_amostra: int,

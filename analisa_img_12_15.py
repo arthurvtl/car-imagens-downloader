@@ -17,8 +17,6 @@ import rasterio
 
 logger = logging.getLogger(__name__)
 
-PIXEL_VAZIO = (0, 0, 0)
-
 
 def calcular_cobertura(caminho_imagem: Path) -> float:
     """
