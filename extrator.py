@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from utils.manifesto import (
     registrar_resultado,
 )
 from utils.wms import baixar_imagem_async, calcular_bbox_latlon, conectar_wms, validar_camada
+from analisa_img_12_15 import analisar_imagens_uso_solo
 
 import shutil
 import tkinter as tk
@@ -140,39 +142,33 @@ async def processar_amostra_async(
     configuracoes: dict,
 ) -> dict:
     """
-    Processa uma única amostra: calcula o bbox, baixa SATELITE e SEGMENTADO
+    Processa uma única amostra: calcula o bbox, baixa SATELITE e USO_SOLO
     em paralelo via asyncio.gather, e retorna o resultado.
+    Ambos os arquivos ficam na mesma pasta de saída.
     """
     async with semaforo:
         logger = logging.getLogger(__name__)
         cfg = configuracoes
 
-        prefixo = cfg["prefixo_arquivo"]
-        nome_arquivo = f"{prefixo}_{numero_amostra}.tif"
+        pasta = Path(cfg["pasta_saida"])
+        caminho_satelite = pasta / f"amostra_{numero_amostra}_satelite_1920.tif"
+        caminho_uso_solo = pasta / f"amostra_{numero_amostra}_uso_solo_1920.tif"
 
-        pasta_satelite = Path(cfg["pasta_saida"]) / cfg["nome_pasta_satelite"]
-        pasta_segmentado = Path(cfg["pasta_saida"]) / cfg["nome_pasta_segmentado"]
-
-        caminho_satelite = pasta_satelite / nome_arquivo
-        caminho_segmentado = pasta_segmentado / nome_arquivo
-
-        # Calcular bbox em lat/lon
         bbox = calcular_bbox_latlon(x, y, cfg["buffer_metros"], cfg["srid_entrada"])
 
-        # Baixar SATELITE e SEGMENTADO em paralelo
-        status_satelite, status_segmentado = await asyncio.gather(
+        status_satelite, status_uso_solo = await asyncio.gather(
             _baixar_uma_imagem_async(
                 sessao, cfg, cfg["camada_satelite"], bbox, caminho_satelite
             ),
             _baixar_uma_imagem_async(
-                sessao, cfg, cfg["camada_uso_solo"], bbox, caminho_segmentado
+                sessao, cfg, cfg["camada_uso_solo"], bbox, caminho_uso_solo
             ),
         )
 
         if status_satelite == "ok":
-            logger.info(f"[amostra_{numero_amostra}] SATELITE OK")
-        if status_segmentado == "ok":
-            logger.info(f"[amostra_{numero_amostra}] SEGMENTADO OK")
+            logger.info(f"[amostra_{numero_amostra}] SATELITE 1920 OK")
+        if status_uso_solo == "ok":
+            logger.info(f"[amostra_{numero_amostra}] USO_SOLO 1920 OK")
 
         return {
             "numero_amostra": numero_amostra,
@@ -181,7 +177,7 @@ async def processar_amostra_async(
             "y": y,
             "bbox": bbox,
             "status_satelite": status_satelite,
-            "status_uso_solo": status_segmentado,
+            "status_uso_solo": status_uso_solo,
         }
 
 
@@ -237,13 +233,10 @@ async def executar_pipeline_async(cfg: dict) -> None:
 
     dataframe["numero_amostra"] = range(1, len(dataframe) + 1)
 
-    # ---- Passo 4: Criar pastas de saída ----
-    pasta_satelite = Path(cfg["pasta_saida"]) / cfg["nome_pasta_satelite"]
-    pasta_segmentado = Path(cfg["pasta_saida"]) / cfg["nome_pasta_segmentado"]
-    pasta_satelite.mkdir(parents=True, exist_ok=True)
-    pasta_segmentado.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Pasta SATELITE  : {pasta_satelite.resolve()}")
-    logger.info(f"Pasta SEGMENTADO: {pasta_segmentado.resolve()}")
+    # ---- Passo 4: Criar pasta de saída ----
+    pasta_saida = Path(cfg["pasta_saida"])
+    pasta_saida.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Pasta de saída: {pasta_saida.resolve()}")
 
     # ---- Passo 5: Processar amostras de forma assíncrona ----
     contagem_sucesso = 0
@@ -326,10 +319,6 @@ def processar_ano_2019_2020(
     cfg["workers_paralelos"] = CONFIGURACOES["workers_paralelos"]
     cfg["limite_amostras"] = qtd_imagens  # None = sem limite
 
-    # Nomes das pastas de saída (fixos, padronizados)
-    cfg["nome_pasta_satelite"] = "SATELITE"
-    cfg["nome_pasta_segmentado"] = "SEGMENTADO"
-
     asyncio.run(executar_pipeline_async(cfg))
 
 
@@ -354,6 +343,8 @@ def processar_ano_2012(
     logger = logging.getLogger(__name__)
     configurar_logging(CONFIGURACOES["pasta_logs"], CONFIGURACOES["nome_log"])
 
+    t_pipeline_inicio = time.time()
+
     url_zip = CONFIGURACOES["url_shapefile_2012"]
     pasta_temp = Path(CONFIGURACOES["pasta_temp_shapefile"])
     pasta_temp.mkdir(parents=True, exist_ok=True)
@@ -365,7 +356,10 @@ def processar_ano_2012(
     epsg_saida = CONFIGURACOES["epsg_codigo_saida"]
 
     # ---------------- Download do ZIP do shapefile ----------------
-    atualizar_status("Baixando shapefile 2012 (pode demorar alguns minutos)...")
+    t0 = time.time()
+    msg = "[ETAPA 1/6] Baixando shapefile 2012..."
+    print(msg)
+    atualizar_status(msg)
     try:
         with requests.get(url_zip, stream=True) as resposta:
             resposta.raise_for_status()
@@ -392,13 +386,16 @@ def processar_ano_2012(
         logger.error(f"Falha no download do shapefile 2012: {exc}")
         atualizar_status("Erro ao baixar shapefile 2012. Veja o log.")
         return
+    print(f"  -> Shapefile baixado em {time.time() - t0:.1f}s")
 
     # ---------------- Extração do ZIP ----------------
-    atualizar_status("Extraindo shapefile 2012...")
+    t0 = time.time()
+    msg = "[ETAPA 2/6] Extraindo shapefile 2012..."
+    print(msg)
+    atualizar_status(msg)
     with zipfile.ZipFile(caminho_zip, "r") as zip_ref:
         zip_ref.extractall(pasta_temp)
 
-    # Localizar o primeiro arquivo .shp dentro da pasta temporária
     shapefile_encontrado = None
     for raiz, _, arquivos in os.walk(pasta_temp):
         for nome_arquivo in arquivos:
@@ -412,9 +409,12 @@ def processar_ano_2012(
         logger.error("Nenhum arquivo .shp foi encontrado no ZIP extraído.")
         atualizar_status("Erro: shapefile 2012 não encontrado no ZIP.")
         return
+    print(f"  -> Extraído em {time.time() - t0:.1f}s")
 
     # ---------------- Leitura do CSV ----------------
-    atualizar_status("Lendo CSV de coordenadas...")
+    msg = "[ETAPA 3/6] Lendo CSV de coordenadas..."
+    print(msg)
+    atualizar_status(msg)
     df = pd.read_csv(arquivo_csv, sep=";")
 
     if "x" not in df.columns or "y" not in df.columns:
@@ -427,22 +427,24 @@ def processar_ano_2012(
     if total_pontos == 0:
         atualizar_status("Nenhum ponto encontrado no CSV para 2012.")
         return
+    print(f"  -> {total_pontos} coordenadas para processar")
 
     # ---------------- Leitura e preparação do shapefile ----------------
-    atualizar_status("Lendo shapefile de uso do solo 2012...")
+    t0 = time.time()
+    msg = "[ETAPA 4/6] Carregando shapefile na memória e reprojetando..."
+    print(msg)
+    atualizar_status(msg)
     gdf_uso_solo = gpd.read_file(shapefile_encontrado)
-    # Log auxiliar para inspecionar nomes reais das colunas
     print(
-        f"Colunas reais encontradas no shapefile 2012: {gdf_uso_solo.columns.tolist()}"
+        f"  Colunas do shapefile: {gdf_uso_solo.columns.tolist()}"
     )
 
     if gdf_uso_solo.crs is None:
         raise ValueError("O shapefile 2012 não possui CRS definido.")
 
-    # Reprojetar o uso do solo para o mesmo CRS do WMS (EPSG:4326)
     gdf_uso_solo = gdf_uso_solo.to_crs(srid_wms)
+    print(f"  -> Shapefile carregado e reprojetado em {time.time() - t0:.1f}s")
 
-    # Identificar dinamicamente as colunas de ID e Classe (case-insensitive)
     colunas_lower = {
         col.lower().strip(): col for col in gdf_uso_solo.columns
     }
@@ -455,7 +457,6 @@ def processar_ano_2012(
             f"Colunas disponíveis no shapefile: {gdf_uso_solo.columns.tolist()}"
         )
 
-    # Construir dicionário dinâmico ID -> RGB a partir das colunas identificadas
     id_para_rgb: dict[int, tuple[int, int, int]] = {0: (0, 0, 0)}
     for _, linha in gdf_uso_solo[[col_id, col_classe]].drop_duplicates().iterrows():
         try:
@@ -467,33 +468,43 @@ def processar_ano_2012(
         if cor is not None:
             id_para_rgb[classe_id] = cor
 
+    t_preparacao = time.time() - t_pipeline_inicio
+    print(f"\n{'='*60}")
+    print(f"  Preparação total: {t_preparacao:.1f}s")
+    print(f"  Iniciando download das {total_pontos} imagens...")
+    print(f"{'='*60}\n")
+
     pasta_saida_path = Path(pasta_saida)
     pasta_saida_path.mkdir(parents=True, exist_ok=True)
 
-    atualizar_status("Processando pontos para o ano de 2012...")
+    msg = f"[ETAPA 5/6] Baixando imagens (0/{total_pontos})..."
+    print(msg)
+    atualizar_status(msg)
     atualizar_progresso("determinate", value=0, maximum=total_pontos)
 
     # ---------------- Loop por ponto ----------------
+    t_imagens_inicio = time.time()
+    tempos_por_amostra: list[float] = []
+
     for idx, row in df.iterrows():
         numero_amostra = idx + 1
         x = float(row["x"])
         y = float(row["y"])
+        t_amostra = time.time()
 
         try:
-            # Calcula o bbox em EPSG:4326 a partir de x,y em EPSG:31984
             minx, miny, maxx, maxy = calcular_bbox_latlon(
                 x, y, buffer_metros, CONFIGURACOES["srid_entrada"]
             )
 
-            # Seleciona apenas polígonos do uso do solo que intersectam o bbox
             gdf_recorte = gdf_uso_solo.cx[minx:maxx, miny:maxy]
             if gdf_recorte.empty:
+                print(f"  [amostra_{numero_amostra}] PULADA (sem polígono no bbox)")
                 logger.warning(
                     f"[2012][amostra_{numero_amostra}] Nenhum polígono de uso do solo no bbox, ponto pulado."
                 )
                 continue
 
-            # Caminhos de saída para esta amostra
             caminho_satelite = (
                 pasta_saida_path / f"amostra_{numero_amostra}_satelite_2012.tif"
             )
@@ -501,7 +512,7 @@ def processar_ano_2012(
                 pasta_saida_path / f"amostra_{numero_amostra}_uso_solo_2012.tif"
             )
 
-            # ---------------- Passo A - Satélite via WMS ----------------
+            # Passo A - Satélite via WMS
             async def _baixar_satelite():
                 cfg = dict(CONFIGURACOES)
                 cfg["largura_pixels"] = largura
@@ -528,15 +539,15 @@ def processar_ano_2012(
             try:
                 asyncio.run(_baixar_satelite())
             except Exception as exc:
+                print(f"  [amostra_{numero_amostra}] ERRO satélite: {exc}")
                 logger.error(
                     f"[2012][amostra_{numero_amostra}] Falha ao baixar satélite via WMS: {exc}"
                 )
                 continue
 
-            # ---------------- Passo B - Rasterização do uso do solo ----------------
+            # Passo B - Rasterização do uso do solo
             transform = from_bounds(minx, miny, maxx, maxy, largura, altura)
 
-            # Rasterização por ID de classe ('C')
             shapes = []
             for geom, classe_id_val in zip(
                 gdf_recorte.geometry, gdf_recorte[col_id]
@@ -550,6 +561,7 @@ def processar_ano_2012(
                 shapes.append((geom, cid))
 
             if not shapes:
+                print(f"  [amostra_{numero_amostra}] PULADA (sem geometrias válidas)")
                 logger.warning(
                     f"[2012][amostra_{numero_amostra}] Sem geometrias válidas para rasterizar, ponto pulado."
                 )
@@ -563,7 +575,6 @@ def processar_ano_2012(
                 dtype="uint8",
             )
 
-            # Converter matriz 2D de IDs em matriz RGB 3D (3, H, W)
             rgb_array = np.zeros((3, altura, largura), dtype=np.uint8)
             for classe_id, cor in id_para_rgb.items():
                 r, g, b = cor
@@ -589,19 +600,57 @@ def processar_ano_2012(
             ) as dst:
                 dst.write(rgb_array)
 
-            logger.info(f"[2012][amostra_{numero_amostra}] Satélite e uso do solo OK")
+            dt = time.time() - t_amostra
+            tempos_por_amostra.append(dt)
+            media = sum(tempos_por_amostra) / len(tempos_por_amostra)
+            restante = (total_pontos - numero_amostra) * media
+
+            print(
+                f"  [amostra_{numero_amostra}/{total_pontos}] OK em {dt:.1f}s "
+                f"(média {media:.1f}s/img — restante ~{restante:.0f}s)"
+            )
+            logger.info(f"[2012][amostra_{numero_amostra}] OK em {dt:.1f}s")
 
         except Exception as exc:
+            print(f"  [amostra_{numero_amostra}] ERRO: {exc}")
             logger.error(
                 f"[2012][amostra_{numero_amostra}] Erro no processamento do ponto: {exc}"
             )
-            # Pula este ponto e continua com o próximo
             continue
         finally:
-            # Atualiza a barra de progresso ponto a ponto
             atualizar_progresso(
                 "determinate", value=numero_amostra, maximum=total_pontos
             )
+
+    t_imagens_total = time.time() - t_imagens_inicio
+    media_final = t_imagens_total / max(len(tempos_por_amostra), 1)
+    print(f"\n{'='*60}")
+    print(f"  Imagens processadas: {len(tempos_por_amostra)}/{total_pontos}")
+    print(f"  Tempo total imagens: {t_imagens_total:.1f}s")
+    print(f"  Média por imagem:    {media_final:.2f}s")
+    print(f"{'='*60}\n")
+
+    # ---------------- Análise de cobertura das imagens ----------------
+    msg = "[ETAPA 6/6] Analisando cobertura das imagens de uso do solo..."
+    print(msg)
+    atualizar_status(msg)
+    try:
+        pasta_relatorios = Path(CONFIGURACOES["pasta_artifacts"])
+        resultado_analise = analisar_imagens_uso_solo(
+            pasta_imagens=pasta_saida_path,
+            arquivo_csv=arquivo_csv,
+            pasta_relatorios=pasta_relatorios,
+            qtd_imagens=qtd_imagens,
+            callback_progresso=atualizar_progresso,
+            callback_status=atualizar_status,
+        )
+        logger.info(
+            f"[2012] Análise: {resultado_analise['cheias']} cheias, "
+            f"{resultado_analise['incompletas']} incompletas"
+        )
+    except Exception as exc:
+        logger.error(f"Erro na análise de cobertura: {exc}")
+        atualizar_status(f"Erro na análise: {exc}")
 
     # ---------------- Limpeza opcional ----------------
     if not manter_shapefile:
@@ -614,7 +663,14 @@ def processar_ano_2012(
         except Exception as exc:
             logger.warning(f"Falha ao limpar arquivos temporários de 2012: {exc}")
 
-    atualizar_status("Processamento 2012 concluído.")
+    t_total = time.time() - t_pipeline_inicio
+    msg_final = (
+        f"Pipeline 2012 concluído em {t_total:.0f}s "
+        f"(preparação: {t_preparacao:.0f}s + imagens: {t_imagens_total:.0f}s)"
+    )
+    print(f"\n{msg_final}")
+    logger.info(msg_final)
+    atualizar_status(msg_final)
 
 
 # ---------------------------------------------------------------------------
@@ -637,6 +693,9 @@ class AplicacaoGUI:
         self.qtd_var = tk.StringVar(value="")
         self.ano_var = tk.StringVar(value="2019-2020")
         self.manter_shapefile_var = tk.BooleanVar(value=False)
+        self.simultaneo_var = tk.BooleanVar(value=False)
+        self.pasta_1215_var = tk.StringVar()
+        self.pasta_1920_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Pronto.")
 
         self._construir_layout()
@@ -645,30 +704,30 @@ class AplicacaoGUI:
         """Monta os componentes visuais da janela principal."""
         frame_principal = ttk.Frame(self.root, padding=10)
         frame_principal.grid(row=0, column=0, sticky="nsew")
+        self._frame_principal = frame_principal
 
         # Linha 0 - Arquivo CSV
         ttk.Label(frame_principal, text="Arquivo CSV de Entrada:").grid(
             row=0, column=0, sticky="w"
         )
-        entry_csv = ttk.Entry(
+        ttk.Entry(
             frame_principal, textvariable=self.caminho_csv_var, width=50, state="readonly"
-        )
-        entry_csv.grid(row=0, column=1, padx=5, pady=2, sticky="w")
+        ).grid(row=0, column=1, padx=5, pady=2, sticky="w")
         ttk.Button(
             frame_principal, text="Selecionar...", command=self._selecionar_csv
         ).grid(row=0, column=2, padx=5, pady=2)
 
-        # Linha 1 - Pasta de saída
-        ttk.Label(frame_principal, text="Pasta de Saída:").grid(
-            row=1, column=0, sticky="w"
-        )
-        entry_saida = ttk.Entry(
+        # Linha 1 - Pasta de saída (modo individual)
+        self._lbl_pasta_saida = ttk.Label(frame_principal, text="Pasta de Saída:")
+        self._lbl_pasta_saida.grid(row=1, column=0, sticky="w")
+        self._entry_pasta_saida = ttk.Entry(
             frame_principal, textvariable=self.pasta_saida_var, width=50, state="readonly"
         )
-        entry_saida.grid(row=1, column=1, padx=5, pady=2, sticky="w")
-        ttk.Button(
+        self._entry_pasta_saida.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+        self._btn_pasta_saida = ttk.Button(
             frame_principal, text="Selecionar...", command=self._selecionar_pasta_saida
-        ).grid(row=1, column=2, padx=5, pady=2)
+        )
+        self._btn_pasta_saida.grid(row=1, column=2, padx=5, pady=2)
 
         # Linha 2 - Buffer
         ttk.Label(frame_principal, text="Buffer (metros):").grid(
@@ -686,45 +745,103 @@ class AplicacaoGUI:
             row=3, column=1, padx=5, pady=2, sticky="w"
         )
 
-        # Linha 4 - Ano (Combobox)
-        ttk.Label(frame_principal, text="Ano:").grid(row=4, column=0, sticky="w")
-        combo_ano = ttk.Combobox(
+        # Linha 4 - Ano (Combobox) — escondido no modo simultâneo
+        self._lbl_ano = ttk.Label(frame_principal, text="Ano:")
+        self._lbl_ano.grid(row=4, column=0, sticky="w")
+        self._combo_ano = ttk.Combobox(
             frame_principal,
             textvariable=self.ano_var,
             values=["2012-2015", "2019-2020"],
             state="readonly",
             width=15,
         )
-        combo_ano.grid(row=4, column=1, padx=5, pady=2, sticky="w")
+        self._combo_ano.grid(row=4, column=1, padx=5, pady=2, sticky="w")
 
-        # Linha 5 - Checkbox Manter Shapefile
-        check_manter = ttk.Checkbutton(
+        # Linha 5 - Checkbox Download Simultâneo
+        check_simultaneo = ttk.Checkbutton(
+            frame_principal,
+            text="Download simultâneo 12-15, 19-20",
+            variable=self.simultaneo_var,
+            command=self._alternar_modo_simultaneo,
+        )
+        check_simultaneo.grid(row=5, column=0, columnspan=2, sticky="w", pady=(5, 2))
+
+        # Linha 6 - Pasta 12-15 (inicialmente escondida)
+        self._lbl_pasta_1215 = ttk.Label(frame_principal, text="Pasta Saída 12-15:")
+        self._entry_pasta_1215 = ttk.Entry(
+            frame_principal, textvariable=self.pasta_1215_var, width=50, state="readonly"
+        )
+        self._btn_pasta_1215 = ttk.Button(
+            frame_principal, text="Selecionar...", command=self._selecionar_pasta_1215
+        )
+
+        # Linha 7 - Pasta 19-20 (inicialmente escondida)
+        self._lbl_pasta_1920 = ttk.Label(frame_principal, text="Pasta Saída 19-20:")
+        self._entry_pasta_1920 = ttk.Entry(
+            frame_principal, textvariable=self.pasta_1920_var, width=50, state="readonly"
+        )
+        self._btn_pasta_1920 = ttk.Button(
+            frame_principal, text="Selecionar...", command=self._selecionar_pasta_1920
+        )
+
+        # Linha 8 - Checkbox Manter Shapefile
+        self._check_manter = ttk.Checkbutton(
             frame_principal,
             text="Manter Shapefile (Apenas 2012-2015)",
             variable=self.manter_shapefile_var,
         )
-        check_manter.grid(row=5, column=0, columnspan=2, sticky="w", pady=(5, 5))
+        self._check_manter.grid(row=8, column=0, columnspan=2, sticky="w", pady=(2, 5))
 
-        # Linha 6 - Botão Executar
-        btn_executar = ttk.Button(
+        # Linha 9 - Botão Executar
+        ttk.Button(
             frame_principal,
             text="Executar Processamento",
             command=self._iniciar_processamento_thread,
-        )
-        btn_executar.grid(row=6, column=0, columnspan=3, pady=(10, 5))
+        ).grid(row=9, column=0, columnspan=3, pady=(10, 5))
 
-        # Linha 7 - Barra de progresso
+        # Linha 10 - Barra de progresso
         self.progressbar = ttk.Progressbar(
             frame_principal, orient="horizontal", mode="indeterminate", length=300
         )
-        self.progressbar.grid(row=7, column=0, columnspan=3, pady=(5, 5), sticky="we")
+        self.progressbar.grid(row=10, column=0, columnspan=3, pady=(5, 5), sticky="we")
 
-        # Linha 8 - Status (rodapé)
+        # Linha 11 - Status (rodapé)
         frame_status = ttk.Frame(self.root, padding=(10, 0, 10, 10))
         frame_status.grid(row=1, column=0, sticky="we")
         ttk.Label(frame_status, textvariable=self.status_var).grid(
             row=0, column=0, sticky="w"
         )
+
+    def _alternar_modo_simultaneo(self) -> None:
+        """Mostra/esconde campos conforme o checkbox de download simultâneo."""
+        if self.simultaneo_var.get():
+            # Esconde pasta única e combobox de ano
+            self._lbl_pasta_saida.grid_remove()
+            self._entry_pasta_saida.grid_remove()
+            self._btn_pasta_saida.grid_remove()
+            self._lbl_ano.grid_remove()
+            self._combo_ano.grid_remove()
+            # Mostra as duas pastas
+            self._lbl_pasta_1215.grid(row=6, column=0, sticky="w")
+            self._entry_pasta_1215.grid(row=6, column=1, padx=5, pady=2, sticky="w")
+            self._btn_pasta_1215.grid(row=6, column=2, padx=5, pady=2)
+            self._lbl_pasta_1920.grid(row=7, column=0, sticky="w")
+            self._entry_pasta_1920.grid(row=7, column=1, padx=5, pady=2, sticky="w")
+            self._btn_pasta_1920.grid(row=7, column=2, padx=5, pady=2)
+        else:
+            # Esconde as duas pastas
+            self._lbl_pasta_1215.grid_remove()
+            self._entry_pasta_1215.grid_remove()
+            self._btn_pasta_1215.grid_remove()
+            self._lbl_pasta_1920.grid_remove()
+            self._entry_pasta_1920.grid_remove()
+            self._btn_pasta_1920.grid_remove()
+            # Mostra pasta única e combobox de ano
+            self._lbl_pasta_saida.grid(row=1, column=0, sticky="w")
+            self._entry_pasta_saida.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+            self._btn_pasta_saida.grid(row=1, column=2, padx=5, pady=2)
+            self._lbl_ano.grid(row=4, column=0, sticky="w")
+            self._combo_ano.grid(row=4, column=1, padx=5, pady=2, sticky="w")
 
     # ---------------- Callbacks da interface ----------------
     def _selecionar_csv(self) -> None:
@@ -737,10 +854,22 @@ class AplicacaoGUI:
             self.caminho_csv_var.set(caminho)
 
     def _selecionar_pasta_saida(self) -> None:
-        """Abre diálogo para seleção da pasta de saída."""
+        """Abre diálogo para seleção da pasta de saída (modo individual)."""
         pasta = filedialog.askdirectory(title="Selecione a pasta de saída")
         if pasta:
             self.pasta_saida_var.set(pasta)
+
+    def _selecionar_pasta_1215(self) -> None:
+        """Abre diálogo para seleção da pasta de saída das imagens 2012-2015."""
+        pasta = filedialog.askdirectory(title="Selecione a pasta de saída para 2012-2015")
+        if pasta:
+            self.pasta_1215_var.set(pasta)
+
+    def _selecionar_pasta_1920(self) -> None:
+        """Abre diálogo para seleção da pasta de saída das imagens 2019-2020."""
+        pasta = filedialog.askdirectory(title="Selecione a pasta de saída para 2019-2020")
+        if pasta:
+            self.pasta_1920_var.set(pasta)
 
     # ---------------- Helpers de atualização de status/progresso ----------------
     def atualizar_status_threadsafe(self, mensagem: str) -> None:
@@ -781,20 +910,33 @@ class AplicacaoGUI:
         Valida entradas e inicia o processamento em uma thread separada
         para não bloquear a interface gráfica.
         """
-
         caminho_csv = self.caminho_csv_var.get().strip()
-        pasta_saida = self.pasta_saida_var.get().strip()
-        ano = self.ano_var.get()
+        modo_simultaneo = self.simultaneo_var.get()
         manter_shapefile = self.manter_shapefile_var.get()
 
-        # Validações básicas
+        # Validação: CSV
         if not caminho_csv:
             messagebox.showerror("Erro", "Selecione o arquivo CSV de entrada.")
             return
-        if not pasta_saida:
-            messagebox.showerror("Erro", "Selecione a pasta de saída.")
-            return
 
+        # Validação: pastas de saída conforme o modo
+        if modo_simultaneo:
+            pasta_1215 = self.pasta_1215_var.get().strip()
+            pasta_1920 = self.pasta_1920_var.get().strip()
+            if not pasta_1215:
+                messagebox.showerror("Erro", "Selecione a pasta de saída para 2012-2015.")
+                return
+            if not pasta_1920:
+                messagebox.showerror("Erro", "Selecione a pasta de saída para 2019-2020.")
+                return
+        else:
+            pasta_saida = self.pasta_saida_var.get().strip()
+            if not pasta_saida:
+                messagebox.showerror("Erro", "Selecione a pasta de saída.")
+                return
+            ano = self.ano_var.get()
+
+        # Validação: buffer
         try:
             buffer_metros = int(self.buffer_var.get())
             if buffer_metros <= 0:
@@ -805,6 +947,7 @@ class AplicacaoGUI:
             )
             return
 
+        # Validação: quantidade
         qtd_imagens = None
         qtd_txt = self.qtd_var.get().strip()
         if qtd_txt:
@@ -823,43 +966,71 @@ class AplicacaoGUI:
         self.atualizar_status_threadsafe("Iniciando processamento...")
         self.atualizar_progresso_threadsafe("indeterminate")
 
-        # Função que roda em thread separada
+        def _executar_2012(pasta_destino: str) -> None:
+            """Executa o pipeline 2012-2015 com análise de cobertura."""
+            try:
+                processar_ano_2012(
+                    arquivo_csv=caminho_csv,
+                    pasta_saida=pasta_destino,
+                    buffer_metros=buffer_metros,
+                    qtd_imagens=qtd_imagens,
+                    manter_shapefile=manter_shapefile,
+                    atualizar_status=self.atualizar_status_threadsafe,
+                    atualizar_progresso=self.atualizar_progresso_threadsafe,
+                )
+            except Exception as exc:
+                mensagem_erro = f"Erro no processamento 2012-2015: {exc}"
+                self.atualizar_status_threadsafe(mensagem_erro)
+                self.root.after(
+                    0, lambda: messagebox.showerror("Erro", mensagem_erro)
+                )
+
+        def _executar_2019(pasta_destino: str) -> None:
+            """Executa o pipeline 2019-2020."""
+            try:
+                self.atualizar_status_threadsafe(
+                    "Executando pipeline WMS (2019-2020)..."
+                )
+                processar_ano_2019_2020(
+                    arquivo_csv=caminho_csv,
+                    pasta_saida=pasta_destino,
+                    buffer_metros=buffer_metros,
+                    qtd_imagens=qtd_imagens,
+                )
+                self.atualizar_status_threadsafe(
+                    "Processamento 2019-2020 concluído com sucesso."
+                )
+            except Exception as exc:
+                mensagem_erro = f"Erro no processamento 2019-2020: {exc}"
+                self.atualizar_status_threadsafe(mensagem_erro)
+                self.root.after(
+                    0, lambda: messagebox.showerror("Erro", mensagem_erro)
+                )
+
         def _worker():
             try:
-                if ano == "2012-2015":
-                    processar_ano_2012(
-                        arquivo_csv=caminho_csv,
-                        pasta_saida=pasta_saida,
-                        buffer_metros=buffer_metros,
-                        qtd_imagens=qtd_imagens,
-                        manter_shapefile=manter_shapefile,
-                        atualizar_status=self.atualizar_status_threadsafe,
-                        atualizar_progresso=self.atualizar_progresso_threadsafe,
-                    )
-                else:
-                    # Para 2019-2020 mantemos o fluxo WMS original
+                if modo_simultaneo:
                     self.atualizar_status_threadsafe(
-                        "Executando pipeline WMS (2019-2020)..."
+                        "Executando 2012-2015 e 2019-2020 em paralelo..."
                     )
-                    processar_ano_2019_2020(
-                        arquivo_csv=caminho_csv,
-                        pasta_saida=pasta_saida,
-                        buffer_metros=buffer_metros,
-                        qtd_imagens=qtd_imagens,
+                    t_2012 = threading.Thread(
+                        target=_executar_2012, args=(pasta_1215,), daemon=True
                     )
+                    t_2019 = threading.Thread(
+                        target=_executar_2019, args=(pasta_1920,), daemon=True
+                    )
+                    t_2012.start()
+                    t_2019.start()
+                    t_2012.join()
+                    t_2019.join()
                     self.atualizar_status_threadsafe(
-                        "Processamento 2019-2020 concluído com sucesso."
+                        "Download simultâneo (2012-2015 + 2019-2020) concluído."
                     )
-            except Exception as exc:
-                mensagem_erro = f"Erro durante o processamento: {exc}"
-                self.atualizar_status_threadsafe(mensagem_erro)
-
-                def _mostrar_erro():
-                    messagebox.showerror("Erro", mensagem_erro)
-
-                self.root.after(0, _mostrar_erro)
+                elif ano == "2012-2015":
+                    _executar_2012(pasta_saida)
+                elif ano == "2019-2020":
+                    _executar_2019(pasta_saida)
             finally:
-                # Para a barra de progresso ao final
                 self.atualizar_progresso_threadsafe(
                     "determinate", value=0, maximum=100
                 )
