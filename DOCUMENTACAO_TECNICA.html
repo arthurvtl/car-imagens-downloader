@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Documentação Técnica - IMG-EXTRACTOR</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --paper: #ffffff;
+      --text: #1d2430;
+      --muted: #5d6878;
+      --line: #d9dee7;
+      --accent: #1f6feb;
+      --code-bg: #f0f3f7;
+      --code-border: #d8dee9;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; line-height: 1.58; }
+    .page { max-width: 1120px; margin: 0 auto; padding: 32px 20px 56px; }
+    header { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 28px; margin-bottom: 20px; }
+    header h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.2; letter-spacing: 0; }
+    header p { margin: 0; color: var(--muted); max-width: 760px; }
+    .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 20px; align-items: start; }
+    nav { position: sticky; top: 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 18px; max-height: calc(100vh - 32px); overflow: auto; }
+    nav h2 { margin: 0 0 12px; font-size: 16px; }
+    nav ol { list-style: none; padding: 0; margin: 0; }
+    nav li { margin: 4px 0; }
+    nav a { display: block; color: var(--muted); text-decoration: none; border-radius: 5px; padding: 5px 7px; font-size: 14px; line-height: 1.3; }
+    nav a:hover { color: var(--accent); background: #edf4ff; }
+    .toc-level-3 a { padding-left: 20px; font-size: 13px; }
+    .toc-level-4 a { padding-left: 34px; font-size: 13px; }
+    main { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 30px; min-width: 0; }
+    main h1 { display: none; }
+    h2 { margin: 34px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 24px; line-height: 1.25; letter-spacing: 0; }
+    h2:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+    h3 { margin: 26px 0 10px; font-size: 18px; line-height: 1.3; }
+    h4, h5, h6 { margin: 20px 0 8px; font-size: 16px; }
+    p { margin: 10px 0; }
+    ul, ol { margin: 10px 0 16px 22px; padding: 0; }
+    li { margin: 5px 0; }
+    code { background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 4px; padding: 1px 5px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 0.92em; }
+    pre { margin: 14px 0 20px; padding: 14px 16px; overflow: auto; background: #111827; color: #e5e7eb; border-radius: 8px; border: 1px solid #1f2937; line-height: 1.48; }
+    pre code { background: transparent; border: 0; color: inherit; padding: 0; font-size: 13px; }
+    a { color: var(--accent); }
+    @media (max-width: 860px) { .page { padding: 18px 12px 36px; } .layout { grid-template-columns: 1fr; } nav { position: static; max-height: none; } main, header { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <h1>Documentação Técnica</h1>
+      <p>Documentação técnica do IMG-EXTRACTOR, focada em arquitetura, stack, pipelines geoespaciais e decisões de implementação.</p>
+    </header>
+    <div class="layout">
+      <nav aria-label="Sumário">
+        <h2>Sumário</h2>
+        <ol>
+          <li class="toc-level-2"><a href="#visao-geral">Visão Geral</a></li>
+<li class="toc-level-2"><a href="#fluxo-principal">Fluxo Principal</a></li>
+<li class="toc-level-2"><a href="#stack-utilizada">Stack Utilizada</a></li>
+<li class="toc-level-3"><a href="#python">Python</a></li>
+<li class="toc-level-3"><a href="#cli-execucao-por-terminal">CLI / execução por terminal</a></li>
+<li class="toc-level-3"><a href="#tkinter">Tkinter</a></li>
+<li class="toc-level-3"><a href="#pandas">pandas</a></li>
+<li class="toc-level-3"><a href="#wms">WMS</a></li>
+<li class="toc-level-3"><a href="#owslib">OWSLib</a></li>
+<li class="toc-level-3"><a href="#aiohttp">aiohttp</a></li>
+<li class="toc-level-3"><a href="#asyncio">asyncio</a></li>
+<li class="toc-level-3"><a href="#requests">requests</a></li>
+<li class="toc-level-3"><a href="#pyproj">pyproj</a></li>
+<li class="toc-level-3"><a href="#rasterio">RasterIO</a></li>
+<li class="toc-level-3"><a href="#geopandas">GeoPandas</a></li>
+<li class="toc-level-3"><a href="#numpy">NumPy</a></li>
+<li class="toc-level-3"><a href="#pillow">Pillow</a></li>
+<li class="toc-level-3"><a href="#shapely">Shapely</a></li>
+<li class="toc-level-3"><a href="#logging">Logging</a></li>
+<li class="toc-level-2"><a href="#tecnologias-nao-usadas">Tecnologias Não Usadas</a></li>
+<li class="toc-level-2"><a href="#arquitetura-de-pastas">Arquitetura de Pastas</a></li>
+<li class="toc-level-2"><a href="#responsabilidades-dos-modulos">Responsabilidades dos Módulos</a></li>
+<li class="toc-level-3"><a href="#extrator-sem-rgbpy">`extrator-sem-rgb.py`</a></li>
+<li class="toc-level-3"><a href="#utilswmspy">`utils/wms.py`</a></li>
+<li class="toc-level-3"><a href="#configuracoespy">`configuracoes.py`</a></li>
+<li class="toc-level-3"><a href="#utilsmanifestopy">`utils/manifesto.py`</a></li>
+<li class="toc-level-3"><a href="#analisaimg1215py">`analisa_img_12_15.py`</a></li>
+<li class="toc-level-2"><a href="#fluxo-de-dados">Fluxo de Dados</a></li>
+<li class="toc-level-3"><a href="#entrada">Entrada</a></li>
+<li class="toc-level-3"><a href="#calculo-do-recorte">Cálculo do Recorte</a></li>
+<li class="toc-level-3"><a href="#consulta-wms">Consulta WMS</a></li>
+<li class="toc-level-3"><a href="#persistencia">Persistência</a></li>
+<li class="toc-level-2"><a href="#pipeline-2019-2020">Pipeline 2019-2020</a></li>
+<li class="toc-level-3"><a href="#conversao-rgb-para-id">Conversão RGB para ID</a></li>
+<li class="toc-level-2"><a href="#pipeline-2012-2015">Pipeline 2012-2015</a></li>
+<li class="toc-level-3"><a href="#rasterizacao">Rasterização</a></li>
+<li class="toc-level-3"><a href="#normalizacao-de-classes">Normalização de Classes</a></li>
+<li class="toc-level-2"><a href="#regras-de-negocio">Regras de Negócio</a></li>
+<li class="toc-level-3"><a href="#entrada-de-dados">Entrada de Dados</a></li>
+<li class="toc-level-3"><a href="#tamanho-da-amostra">Tamanho da Amostra</a></li>
+<li class="toc-level-3"><a href="#formato-das-imagens">Formato das Imagens</a></li>
+<li class="toc-level-3"><a href="#persistencia-em-disco">Persistência em Disco</a></li>
+<li class="toc-level-3"><a href="#tratamento-de-falhas">Tratamento de Falhas</a></li>
+<li class="toc-level-2"><a href="#conceitos-tecnicos-importantes">Conceitos Técnicos Importantes</a></li>
+<li class="toc-level-3"><a href="#buffer">Buffer</a></li>
+<li class="toc-level-3"><a href="#bbox">BBOX</a></li>
+<li class="toc-level-3"><a href="#crs">CRS</a></li>
+<li class="toc-level-3"><a href="#raster">Raster</a></li>
+<li class="toc-level-3"><a href="#bandas">Bandas</a></li>
+<li class="toc-level-3"><a href="#concorrencia-assincrona">Concorrência Assíncrona</a></li>
+<li class="toc-level-3"><a href="#cache">Cache</a></li>
+<li class="toc-level-3"><a href="#tiles">Tiles</a></li>
+<li class="toc-level-3"><a href="#stac">STAC</a></li>
+<li class="toc-level-3"><a href="#ndvi">NDVI</a></li>
+<li class="toc-level-2"><a href="#decisoes-tecnicas">Decisões Técnicas</a></li>
+<li class="toc-level-3"><a href="#uso-de-wms-em-vez-de-download-bruto-de-cenas">Uso de WMS em vez de download bruto de cenas</a></li>
+<li class="toc-level-3"><a href="#mascaras-de-1-banda-em-vez-de-rgb">Máscaras de 1 banda em vez de RGB</a></li>
+<li class="toc-level-3"><a href="#shapefile-local-para-2012-2015">Shapefile local para 2012-2015</a></li>
+<li class="toc-level-3"><a href="#geotiff-como-formato-de-saida">GeoTIFF como formato de saída</a></li>
+<li class="toc-level-3"><a href="#gui-desktop-e-execucao-via-cliscript">GUI desktop e execução via CLI/script</a></li>
+<li class="toc-level-2"><a href="#resumo-tecnico">Resumo Técnico</a></li>
+        </ol>
+      </nav>
+      <main>
+        <h1 id="documentacao-tecnica">Documentação Técnica</h1>
+<h2 id="visao-geral">Visão Geral</h2>
+<p>O projeto é um pipeline geoespacial para extrair imagens de satélite e máscaras de uso do solo a partir de coordenadas de imóveis rurais do CAR. A entrada principal é um CSV com coordenadas em UTM (<code>EPSG:31984</code>), e a saída são arquivos GeoTIFF georreferenciados organizados por amostra.</p>
+<p>O problema resolvido é a geração automatizada de pares de imagens para análise territorial:</p>
+<ul>
+<li>imagem de satélite da área ao redor de um ponto;</li>
+<li>imagem segmentada de uso do solo da mesma área;</li>
+<li>mesma resolução espacial, mesmo recorte e mesma referência geográfica.</li>
+</ul>
+<p>A versão <code>extrator-sem-rgb.py</code> é a variante principal desta branch. Ela busca padronizar as imagens segmentadas como máscaras de 1 banda, onde cada pixel contém o ID numérico da classe de uso do solo, em vez de uma cor RGB.</p>
+<h2 id="fluxo-principal">Fluxo Principal</h2>
+<p>O fluxo da aplicação é:</p>
+<ol>
+<li>A entrada pode vir pela interface Tkinter ou por chamada via terminal/script.</li>
+<li>A aplicação recebe o CSV, pasta de saída, buffer, quantidade de imagens e período.</li>
+<li>O CSV é carregado com <code>pandas</code>.</li>
+<li>Para cada linha, o sistema calcula um BBOX ao redor da coordenada central.</li>
+<li>O BBOX é convertido de <code>EPSG:31984</code> para <code>EPSG:4326</code>.</li>
+<li>O pipeline correspondente ao período é executado:</li>
+</ol>
+<p>- <code>2019-2020</code>: baixa satélite e uso do solo via WMS. - <code>2012-2015</code>: baixa satélite via WMS e rasteriza uso do solo a partir de shapefile.</p>
+<ol>
+<li>As imagens são persistidas como GeoTIFF.</li>
+<li>Logs, manifesto e relatórios auxiliares são gerados em disco.</li>
+</ol>
+<h2 id="stack-utilizada">Stack Utilizada</h2>
+<h3 id="python">Python</h3>
+<p>Python é a linguagem base do projeto. Foi escolhido por causa do ecossistema maduro para processamento geoespacial, manipulação de dados tabulares, rasterização e automação de downloads.</p>
+<p>Ele sustenta toda a aplicação:</p>
+<ul>
+<li>interface gráfica;</li>
+<li>leitura do CSV;</li>
+<li>consumo de WMS;</li>
+<li>processamento raster/vector;</li>
+<li>escrita de GeoTIFF;</li>
+<li>concorrência assíncrona.</li>
+</ul>
+<h3 id="cli-execucao-por-terminal">CLI / execução por terminal</h3>
+<p>O projeto não usa um framework de CLI como <code>argparse</code>, <code>click</code> ou <code>typer</code>. Mesmo assim, ele pode ser operado via terminal de duas formas:</p>
+<ul>
+<li>abrindo a interface gráfica com <code>python extrator-sem-rgb.py</code>;</li>
+<li>chamando diretamente as funções de pipeline em uma execução Python.</li>
+</ul>
+<p>A segunda opção é útil para automação, processamento em lote e integração com scripts externos. Como o arquivo principal da branch tem hífen no nome (<code>extrator-sem-rgb.py</code>), a importação direta exige <code>importlib</code>.</p>
+<p>Exemplo para <code>2019-2020</code>:</p>
+<pre><code class="language-bash">python3 -c &quot;import importlib.util; spec = importlib.util.spec_from_file_location(&#x27;extrator_sem_rgb&#x27;, &#x27;extrator-sem-rgb.py&#x27;); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); mod.processar_ano_2019_2020(&#x27;coordenadas_treino_amostra.csv&#x27;, &#x27;saida_1920&#x27;, 1024, 10)&quot;</code></pre>
+<p>Exemplo para <code>2012-2015</code>:</p>
+<pre><code class="language-bash">python3 -c &quot;import importlib.util; spec = importlib.util.spec_from_file_location(&#x27;extrator_sem_rgb&#x27;, &#x27;extrator-sem-rgb.py&#x27;); mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); cb = lambda *args, **kwargs: None; mod.processar_ano_2012(&#x27;coordenadas_treino_amostra.csv&#x27;, &#x27;saida_1215&#x27;, 1024, 10, False, cb, cb)&quot;</code></pre>
+<p>Os argumentos seguem a assinatura das funções:</p>
+<pre><code class="language-python">processar_ano_2019_2020(
+    arquivo_csv,
+    pasta_saida,
+    buffer_metros,
+    qtd_imagens,
+)
+
+processar_ano_2012(
+    arquivo_csv,
+    pasta_saida,
+    buffer_metros,
+    qtd_imagens,
+    manter_shapefile,
+    atualizar_status,
+    atualizar_progresso,
+)</code></pre>
+<p>No caso de <code>2012-2015</code>, os callbacks são obrigatórios porque o mesmo pipeline é usado pela GUI. Em uso via CLI, eles podem ser funções simples que não fazem nada, como <code>lambda *args, **kwargs: None</code>.</p>
+<h3 id="tkinter">Tkinter</h3>
+<p>Tkinter é a biblioteca padrão de GUI do Python. O projeto usa Tkinter para expor uma interface simples de operação sem depender de frontend web.</p>
+<p>Na arquitetura, ele atua apenas como camada de entrada e controle:</p>
+<ul>
+<li>coleta caminhos e parâmetros;</li>
+<li>dispara pipelines em threads;</li>
+<li>atualiza status e barra de progresso;</li>
+<li>não contém regra geoespacial relevante.</li>
+</ul>
+<p>Trecho central:</p>
+<pre><code class="language-python">threading.Thread(target=_worker, daemon=True).start()</code></pre>
+<p>Essa separação evita que a GUI trave enquanto o pipeline executa downloads e processamento.</p>
+<h3 id="pandas">pandas</h3>
+<p><code>pandas</code> é usado para ler e filtrar o CSV de entrada. O projeto espera colunas como <code>cod_imovel</code>, <code>x</code> e <code>y</code>, separadas por ponto-e-vírgula.</p>
+<p>Ele entra logo no início dos pipelines, transformando o CSV em um <code>DataFrame</code> iterável:</p>
+<pre><code class="language-python">dataframe = pd.read_csv(
+    cfg[&quot;arquivo_csv&quot;], sep=CONFIGURACOES[&quot;separador_csv&quot;]
+)</code></pre>
+<p>Também é usado para limitar a quantidade de amostras:</p>
+<pre><code class="language-python">if limite and limite &lt; total_csv:
+    dataframe = dataframe.head(limite)</code></pre>
+<h3 id="wms">WMS</h3>
+<p>WMS, ou Web Map Service, é um padrão OGC para disponibilizar mapas e imagens geográficas por HTTP. O projeto usa WMS para obter imagens renderizadas do GeoBases/ES.</p>
+<p>O WMS é usado em dois pontos:</p>
+<ul>
+<li>satélite <code>2019-2020</code>;</li>
+<li>uso do solo <code>2019-2020</code>;</li>
+<li>satélite <code>2012-2015</code>.</li>
+</ul>
+<p>As camadas são definidas em <code>configuracoes.py</code>:</p>
+<pre><code class="language-python">&quot;wms_url&quot;: &quot;https://ide.geobases.es.gov.br/geoserver/ows&quot;,
+&quot;camada_satelite&quot;: &quot;geonode:ijsn-ortofotomosaico-es-kompsat-3-3a-2019-2020&quot;,
+&quot;camada_uso_solo&quot;: &quot;geonode:ijsn_map_uso_solo_es_2019_20200&quot;,
+&quot;camada_satelite_2012&quot;: &quot;geonode:iema_ortofotomosaico_es_025m_2012-2015&quot;,</code></pre>
+<p>O projeto monta requisições <code>GetMap</code>, informando camada, BBOX, CRS, altura, largura e formato.</p>
+<pre><code class="language-python">return {
+    &quot;service&quot;: &quot;WMS&quot;,
+    &quot;version&quot;: wms_versao,
+    &quot;request&quot;: &quot;GetMap&quot;,
+    &quot;layers&quot;: camada,
+    &quot;bbox&quot;: bbox_str,
+    &quot;width&quot;: largura_pixels,
+    &quot;height&quot;: altura_pixels,
+    &quot;crs&quot;: srid,
+    &quot;format&quot;: formato,
+    &quot;styles&quot;: &quot;&quot;,
+}</code></pre>
+<h3 id="owslib">OWSLib</h3>
+<p><code>OWSLib</code> é usado para conectar ao WMS e validar se as camadas esperadas existem no catálogo do servidor.</p>
+<p>Ele não faz os downloads das imagens. Sua função é de validação e descoberta:</p>
+<pre><code class="language-python">wms = WebMapService(wms_url, version=wms_versao)
+return nome_camada in wms.contents</code></pre>
+<p>Essa escolha separa validação de catálogo da etapa de download, que fica com <code>aiohttp</code>.</p>
+<h3 id="aiohttp">aiohttp</h3>
+<p><code>aiohttp</code> é usado como cliente HTTP assíncrono para baixar imagens WMS. Foi escolhido porque o pipeline <code>2019-2020</code> precisa baixar muitos pares de imagens e o gargalo principal é I/O de rede.</p>
+<p>Ele entra na arquitetura como camada de comunicação HTTP concorrente:</p>
+<pre><code class="language-python">async with sessao.get(
+    wms_url, params=parametros, timeout=timeout_cfg
+) as resposta:
+    resposta.raise_for_status()
+    return await resposta.read()</code></pre>
+<p>O projeto também usa retry simples para lidar com falhas temporárias do servidor.</p>
+<h3 id="asyncio">asyncio</h3>
+<p><code>asyncio</code> coordena concorrência no pipeline de 2019-2020. Ele permite processar várias amostras em paralelo sem abrir uma thread para cada requisição.</p>
+<p>Dois níveis de paralelismo aparecem no código:</p>
+<ul>
+<li>várias amostras em paralelo, controladas por <code>Semaphore</code>;</li>
+<li>satélite e uso do solo de uma mesma amostra baixados em paralelo com <code>asyncio.gather</code>.</li>
+</ul>
+<pre><code class="language-python">status_satelite, status_uso_solo = await asyncio.gather(
+    _baixar_uma_imagem_async(sessao, cfg, cfg[&quot;camada_satelite&quot;], bbox, caminho_satelite),
+    _baixar_uma_imagem_async(sessao, cfg, cfg[&quot;camada_uso_solo&quot;], bbox, caminho_uso_solo),
+)</code></pre>
+<p>O impacto é direto no tempo total do pipeline, especialmente quando há muitas coordenadas.</p>
+<h3 id="requests">requests</h3>
+<p><code>requests</code> é usado apenas no fluxo <code>2012-2015</code> para baixar o ZIP do shapefile de uso do solo.</p>
+<p>Esse download é síncrono porque ocorre uma única vez antes do processamento das amostras:</p>
+<pre><code class="language-python">with requests.get(url_zip, stream=True) as resposta:
+    resposta.raise_for_status()</code></pre>
+<p>Como o arquivo é grande, o projeto usa streaming e escreve em chunks.</p>
+<h3 id="pyproj">pyproj</h3>
+<p><code>pyproj</code> faz a transformação de coordenadas entre sistemas de referência.</p>
+<p>O CSV usa <code>EPSG:31984</code>, mas o WMS trabalha com <code>EPSG:4326</code>. Por isso, antes de consultar o GeoBases, o projeto converte os cantos do BBOX:</p>
+<pre><code class="language-python">transformador = Transformer.from_crs(
+    srid_entrada, &quot;EPSG:4326&quot;, always_xy=True
+)
+lon_min, lat_min = transformador.transform(xmin_utm, ymin_utm)
+lon_max, lat_max = transformador.transform(xmax_utm, ymax_utm)</code></pre>
+<p>O transformador é cacheado em memória para evitar recriação a cada amostra.</p>
+<h3 id="rasterio">RasterIO</h3>
+<p><code>rasterio</code> é a principal biblioteca de raster do projeto. Ela grava GeoTIFFs com CRS, transformada espacial e compressão.</p>
+<p>No download WMS, o PNG retornado pelo servidor é convertido para GeoTIFF:</p>
+<pre><code class="language-python">with rasterio.open(
+    caminho,
+    &quot;w&quot;,
+    driver=&quot;GTiff&quot;,
+    height=altura_pixels,
+    width=largura_pixels,
+    count=3,
+    dtype=&quot;uint8&quot;,
+    crs=crs,
+    transform=transform_afim,
+    compress=&quot;lzw&quot;,
+) as dataset_raster:
+    dataset_raster.write(array_imagem.transpose(2, 0, 1))</code></pre>
+<p>No fluxo <code>2012-2015</code>, <code>rasterio.features.rasterize</code> transforma geometrias vetoriais do shapefile em máscara raster.</p>
+<h3 id="geopandas">GeoPandas</h3>
+<p><code>GeoPandas</code> é usado no pipeline <code>2012-2015</code> para ler, reprojetar e recortar o shapefile de uso do solo.</p>
+<p>Ele entra na arquitetura como camada vetorial:</p>
+<pre><code class="language-python">gdf_uso_solo = gpd.read_file(shapefile_encontrado)
+gdf_uso_solo = gdf_uso_solo.to_crs(srid_wms)
+gdf_recorte = gdf_uso_solo.cx[minx:maxx, miny:maxy]</code></pre>
+<p>O <code>.cx</code> é usado para reduzir o conjunto de geometrias ao BBOX da amostra antes da rasterização.</p>
+<h3 id="numpy">NumPy</h3>
+<p><code>NumPy</code> representa pixels como arrays. Ele é usado como ponte entre imagem, raster e lógica de máscara.</p>
+<p>Exemplos:</p>
+<ul>
+<li>converter imagem RGB em array;</li>
+<li>comparar pixels por cor;</li>
+<li>montar máscara de IDs;</li>
+<li>detectar pixels vazios na análise de cobertura.</li>
+</ul>
+<p>Na branch sem RGB, o uso mais importante é converter a imagem WMS de uso do solo para IDs:</p>
+<pre><code class="language-python">mascara = (dados[0] == r) &amp; (dados[1] == g) &amp; (dados[2] == b)
+ids_array[mascara] = classe_id</code></pre>
+<h3 id="pillow">Pillow</h3>
+<p><code>Pillow</code> decodifica a imagem PNG retornada pelo WMS. O WMS entrega bytes; o projeto precisa transformar esses bytes em matriz de pixels antes de gravar GeoTIFF.</p>
+<pre><code class="language-python">imagem_pil = Image.open(io.BytesIO(conteudo_binario)).convert(&quot;RGB&quot;)
+array_imagem = np.array(imagem_pil)</code></pre>
+<h3 id="shapely">Shapely</h3>
+<p><code>Shapely</code> é uma dependência geoespacial usada indiretamente pelo GeoPandas para representar e manipular geometrias.</p>
+<p>O projeto não chama muitas APIs de Shapely diretamente. A geometria aparece principalmente em:</p>
+<pre><code class="language-python">for geom, classe_id_val in zip(gdf_recorte.geometry, gdf_recorte[col_id]):
+    shapes.append((geom, id_novo))</code></pre>
+<p>Essas geometrias são entregues ao <code>rasterize</code>.</p>
+<h3 id="logging">Logging</h3>
+<p><code>logging</code> registra eventos em arquivo e terminal. Ele ajuda a auditar falhas de rede, erros por amostra, camadas ausentes e resumo de execução.</p>
+<pre><code class="language-python">logging.basicConfig(
+    level=logging.INFO,
+    format=&quot;%(asctime)s [%(levelname)s] %(message)s&quot;,
+    handlers=[
+        logging.FileHandler(caminho_log, encoding=&quot;utf-8&quot;),
+        logging.StreamHandler(),
+    ],
+)</code></pre>
+<h2 id="tecnologias-nao-usadas">Tecnologias Não Usadas</h2>
+<p>Alguns conceitos comuns em pipelines geoespaciais não aparecem neste projeto:</p>
+<ul>
+<li>STAC API: não há busca em catálogos STAC nem consulta temporal por assets.</li>
+<li>Banco de dados: os dados são lidos de CSV e persistidos em arquivos.</li>
+<li>Backend web: não existe API HTTP própria.</li>
+<li>Frontend web: a interface é desktop com Tkinter.</li>
+<li>Filas externas: não há Celery, Redis, RabbitMQ ou fila persistente.</li>
+<li>Tiles XYZ/WMTS: o projeto usa WMS <code>GetMap</code>, não mosaico em tiles.</li>
+<li>NDVI ou bandas espectrais: não há cálculo espectral; as imagens são tratadas como RGB ou máscara categórica.</li>
+</ul>
+<h2 id="arquitetura-de-pastas">Arquitetura de Pastas</h2>
+<pre><code class="language-text">IMG-EXTRACTOR/
+  extrator-sem-rgb.py          # Pipeline principal da branch sem RGB
+  extrator.py                  # Versão original com máscaras RGB
+  configuracoes.py             # Configurações globais de WMS, CRS e execução
+  analisa_img_12_15.py         # Análise de cobertura das máscaras 2012-2015
+  coordenadas_treino_amostra.csv
+  requirements.txt
+  utils/
+    wms.py                     # WMS, BBOX, download e GeoTIFF
+    manifesto.py               # Escrita do manifesto CSV</code></pre>
+<h2 id="responsabilidades-dos-modulos">Responsabilidades dos Módulos</h2>
+<h3 id="extrator-sem-rgbpy"><code>extrator-sem-rgb.py</code></h3>
+<p>É o orquestrador principal. Contém:</p>
+<ul>
+<li>dicionário de classes e IDs;</li>
+<li>conversão RGB para ID no uso do solo <code>2019-2020</code>;</li>
+<li>pipeline assíncrono <code>2019-2020</code>;</li>
+<li>pipeline vetorial/raster <code>2012-2015</code>;</li>
+<li>interface Tkinter;</li>
+<li>controle de threads da GUI.</li>
+</ul>
+<h3 id="utilswmspy"><code>utils/wms.py</code></h3>
+<p>Centraliza a integração com WMS:</p>
+<ul>
+<li>conexão e validação de camadas;</li>
+<li>cálculo de BBOX;</li>
+<li>montagem dos parâmetros <code>GetMap</code>;</li>
+<li>requisição HTTP assíncrona;</li>
+<li>conversão de PNG para GeoTIFF.</li>
+</ul>
+<p>Essa separação evita duplicar a lógica de WMS entre os períodos.</p>
+<h3 id="configuracoespy"><code>configuracoes.py</code></h3>
+<p>Armazena constantes operacionais:</p>
+<ul>
+<li>URL do WMS;</li>
+<li>nomes de camadas;</li>
+<li>CRS de entrada e saída;</li>
+<li>tamanho das imagens;</li>
+<li>número de workers;</li>
+<li>timeout e retentativas;</li>
+<li>URL do shapefile 2012.</li>
+</ul>
+<h3 id="utilsmanifestopy"><code>utils/manifesto.py</code></h3>
+<p>Grava um CSV de auditoria com o resultado de cada amostra no pipeline <code>2019-2020</code>.</p>
+<p>O manifesto registra:</p>
+<ul>
+<li>número da amostra;</li>
+<li>código do imóvel;</li>
+<li>coordenadas originais;</li>
+<li>BBOX calculado;</li>
+<li>status do satélite;</li>
+<li>status do uso do solo;</li>
+<li>timestamp.</li>
+</ul>
+<h3 id="analisaimg1215py"><code>analisa_img_12_15.py</code></h3>
+<p>Analisa cobertura das imagens segmentadas de <code>2012-2015</code>, classificando-as como completas ou incompletas com base em pixels vazios.</p>
+<p>Observação técnica: este módulo ainda assume imagens RGB e nomes antigos de arquivo. Na branch <code>extrator-sem-rgb.py</code>, as máscaras são salvas como 1 banda e com nome <code>amostra_N.tif</code>, então esse módulo precisa ser ajustado para refletir o novo formato.</p>
+<h2 id="fluxo-de-dados">Fluxo de Dados</h2>
+<h3 id="entrada">Entrada</h3>
+<p>A entrada é um CSV com coordenadas:</p>
+<pre><code class="language-csv">cod_imovel;x;y
+ES-...;317411.43075053697;7898046.959248656</code></pre>
+<p>As coordenadas estão em <code>EPSG:31984</code>, um sistema UTM em metros.</p>
+<h3 id="calculo-do-recorte">Cálculo do Recorte</h3>
+<p>Para cada ponto, o projeto cria um quadrado ao redor da coordenada. O parâmetro <code>buffer_metros</code> representa metade do lado do quadrado.</p>
+<p>Com <code>buffer_metros = 1024</code>, o recorte cobre aproximadamente:</p>
+<pre><code class="language-text">2048m x 2048m</code></pre>
+<p>O BBOX é calculado em UTM e depois convertido para latitude/longitude:</p>
+<pre><code class="language-python">xmin_utm = x - buffer_metros
+ymin_utm = y - buffer_metros
+xmax_utm = x + buffer_metros
+ymax_utm = y + buffer_metros</code></pre>
+<h3 id="consulta-wms">Consulta WMS</h3>
+<p>O BBOX convertido é usado na requisição WMS. Como o projeto usa WMS <code>1.3.0</code> com <code>EPSG:4326</code>, a ordem do BBOX é invertida para <code>lat,lon</code>:</p>
+<pre><code class="language-python">bbox_str = f&quot;{miny_lat},{minx_lon},{maxy_lat},{maxx_lon}&quot;</code></pre>
+<p>Esse detalhe é importante: errar a ordem dos eixos em WMS 1.3.0 costuma gerar imagem vazia ou recorte incorreto.</p>
+<h3 id="persistencia">Persistência</h3>
+<p>As saídas são arquivos GeoTIFF em disco:</p>
+<pre><code class="language-text">pasta_saida/
+  imagens satelites/
+    amostra_1.tif
+  imagens segmentadas/
+    amostra_1.tif</code></pre>
+<p>Os GeoTIFFs recebem:</p>
+<ul>
+<li>CRS <code>EPSG:4326</code>;</li>
+<li>transformada espacial calculada a partir do BBOX;</li>
+<li>compressão LZW;</li>
+<li>tipo <code>uint8</code>.</li>
+</ul>
+<h2 id="pipeline-2019-2020">Pipeline 2019-2020</h2>
+<p>O pipeline <code>2019-2020</code> é totalmente baseado em WMS.</p>
+<p>Para cada amostra:</p>
+<ol>
+<li>Calcula BBOX.</li>
+<li>Baixa satélite via WMS.</li>
+<li>Baixa uso do solo via WMS.</li>
+<li>Salva os dois como GeoTIFF.</li>
+<li>Converte o uso do solo de RGB para máscara de IDs.</li>
+<li>Registra resultado no manifesto.</li>
+</ol>
+<p>O processamento é concorrente:</p>
+<pre><code class="language-python">semaforo = asyncio.Semaphore(cfg[&quot;workers_paralelos&quot;])</code></pre>
+<p>Cada amostra respeita o semáforo:</p>
+<pre><code class="language-python">async with semaforo:
+    ...</code></pre>
+<p>Isso evita sobrecarregar o servidor WMS e controla uso de rede.</p>
+<h3 id="conversao-rgb-para-id">Conversão RGB para ID</h3>
+<p>O WMS de uso do solo retorna uma imagem renderizada por cores. A branch sem RGB converte essas cores em IDs estáveis.</p>
+<p>O mapeamento conceitual é:</p>
+<pre><code class="language-text">RGB da classe -&gt; ID numérico da classe</code></pre>
+<p>Exemplo:</p>
+<pre><code class="language-python">RGB_PARA_ID = {
+    cor: CLASSES_IDS[nome]
+    for nome, cor in CORES_CLASSES_RGB.items()
+}</code></pre>
+<p>Depois, cada pixel é comparado com as cores conhecidas:</p>
+<pre><code class="language-python">for rgb, classe_id in RGB_PARA_ID.items():
+    r, g, b = rgb
+    mascara = (dados[0] == r) &amp; (dados[1] == g) &amp; (dados[2] == b)
+    ids_array[mascara] = classe_id</code></pre>
+<p>O resultado é gravado como GeoTIFF de 1 banda:</p>
+<pre><code class="language-python">perfil.update(
+    count=1,
+    dtype=&quot;uint8&quot;,
+    photometric=&quot;MINISBLACK&quot;
+)</code></pre>
+<h2 id="pipeline-2012-2015">Pipeline 2012-2015</h2>
+<p>O pipeline <code>2012-2015</code> combina WMS com processamento vetorial local.</p>
+<p>O satélite vem do WMS, mas o uso do solo não é baixado como imagem. Ele é produzido a partir de shapefile.</p>
+<p>Fluxo:</p>
+<ol>
+<li>Baixa ZIP do shapefile.</li>
+<li>Extrai o arquivo <code>.shp</code>.</li>
+<li>Lê o shapefile com GeoPandas.</li>
+<li>Reprojeta para <code>EPSG:4326</code>.</li>
+<li>Para cada ponto:</li>
+</ol>
+<p>- calcula BBOX; - recorta geometrias dentro do BBOX; - baixa satélite via WMS; - rasteriza geometrias de uso do solo; - grava máscara de 1 banda.</p>
+<h3 id="rasterizacao">Rasterização</h3>
+<p>Rasterizar é converter geometrias vetoriais, como polígonos, em uma matriz de pixels.</p>
+<p>No projeto, cada polígono de uso do solo vira pixels com um ID de classe:</p>
+<pre><code class="language-python">ids_array = rasterize(
+    shapes=shapes,
+    out_shape=(altura, largura),
+    transform=transform,
+    fill=0,
+    dtype=&quot;uint8&quot;,
+)</code></pre>
+<p>O <code>fill=0</code> representa ausência de classe ou área sem cobertura.</p>
+<h3 id="normalizacao-de-classes">Normalização de Classes</h3>
+<p>O shapefile 2012 pode usar nomes e códigos diferentes dos usados no WMS 2019-2020. A branch cria uma tabela comum de IDs:</p>
+<pre><code class="language-python">CLASSES_IDS = {
+    &quot;Afloramento Rochoso&quot;: 1,
+    &quot;Área Edificada&quot;: 2,
+    &quot;Brejo&quot;: 3,
+    ...
+    &quot;Solo Exposto&quot;: 25,
+}</code></pre>
+<p>Também há aliases para nomes antigos do shapefile:</p>
+<pre><code class="language-python">&quot;Reflorestamento - Eucalipto&quot;: 21,
+&quot;Cultivo Agrícola - Coco-Da-Baía&quot;: 9,</code></pre>
+<p>Essa decisão torna os outputs de <code>2012-2015</code> e <code>2019-2020</code> comparáveis.</p>
+<h2 id="regras-de-negocio">Regras de Negócio</h2>
+<h3 id="entrada-de-dados">Entrada de Dados</h3>
+<p>Cada linha do CSV representa uma amostra. O campo <code>cod_imovel</code> é usado para rastreabilidade, enquanto <code>x</code> e <code>y</code> definem o centro do recorte.</p>
+<p>O pipeline não consulta o CAR diretamente. Ele depende do CSV já preparado.</p>
+<h3 id="tamanho-da-amostra">Tamanho da Amostra</h3>
+<p>O tamanho da área extraída é definido pelo buffer. A configuração padrão é:</p>
+<pre><code class="language-python">&quot;buffer_metros&quot;: 1024,
+&quot;largura_pixels&quot;: 1024,
+&quot;altura_pixels&quot;: 1024,</code></pre>
+<p>Isso gera uma imagem de <code>1024 x 1024</code> pixels cobrindo um quadrado de aproximadamente <code>2048 x 2048</code> metros.</p>
+<h3 id="formato-das-imagens">Formato das Imagens</h3>
+<p>As imagens de satélite são RGB, com 3 bandas.</p>
+<p>As imagens segmentadas na branch sem RGB devem ser máscaras de 1 banda:</p>
+<ul>
+<li><code>0</code>: sem classe / vazio;</li>
+<li><code>1..25</code>: classes de uso do solo.</li>
+</ul>
+<p>Essa escolha é melhor para machine learning e análise raster, porque evita depender de cores como representação semântica.</p>
+<h3 id="persistencia-em-disco">Persistência em Disco</h3>
+<p>O sistema persiste tudo em arquivos locais. Não há banco.</p>
+<p>Principais artefatos:</p>
+<ul>
+<li>GeoTIFFs de satélite;</li>
+<li>GeoTIFFs segmentados;</li>
+<li>manifesto CSV;</li>
+<li>logs;</li>
+<li>relatórios de cobertura para 2012.</li>
+</ul>
+<h3 id="tratamento-de-falhas">Tratamento de Falhas</h3>
+<p>No WMS, falhas de rede são tratadas com retentativas:</p>
+<pre><code class="language-python">for numero_tentativa in range(1, tentativas + 1):
+    try:
+        ...
+    except (aiohttp.ClientError, RuntimeError) as erro:
+        ...</code></pre>
+<p>Se uma imagem falha, a amostra recebe status de erro e o pipeline continua.</p>
+<h2 id="conceitos-tecnicos-importantes">Conceitos Técnicos Importantes</h2>
+<h3 id="buffer">Buffer</h3>
+<p>Buffer é a distância, em metros, aplicada ao redor da coordenada central para formar o recorte.</p>
+<p>No projeto, o buffer não cria uma geometria circular. Ele define um quadrado:</p>
+<pre><code class="language-text">x - buffer, y - buffer, x + buffer, y + buffer</code></pre>
+<p>Impacto:</p>
+<ul>
+<li>controla a área geográfica extraída;</li>
+<li>afeta o nível de detalhe espacial;</li>
+<li>influencia tempo de download e tamanho do arquivo.</li>
+</ul>
+<h3 id="bbox">BBOX</h3>
+<p>BBOX é o retângulo mínimo usado para solicitar ou processar uma área geográfica.</p>
+<p>O projeto usa BBOX para:</p>
+<ul>
+<li>consultar WMS;</li>
+<li>criar a transformada espacial do GeoTIFF;</li>
+<li>recortar geometrias do shapefile;</li>
+<li>garantir alinhamento entre satélite e máscara.</li>
+</ul>
+<h3 id="crs">CRS</h3>
+<p>CRS define o sistema de coordenadas.</p>
+<p>O projeto usa:</p>
+<ul>
+<li><code>EPSG:31984</code> na entrada do CSV;</li>
+<li><code>EPSG:4326</code> nas requisições WMS e nos GeoTIFFs gerados.</li>
+</ul>
+<p>Essa conversão é estrutural. Sem ela, o WMS receberia coordenadas incompatíveis.</p>
+<h3 id="raster">Raster</h3>
+<p>Raster é uma matriz de pixels com significado espacial. No projeto, tanto imagens de satélite quanto máscaras de uso do solo são rasters.</p>
+<p>Cada GeoTIFF contém:</p>
+<ul>
+<li>pixels;</li>
+<li>CRS;</li>
+<li>transformada espacial;</li>
+<li>metadados de dimensão e tipo.</li>
+</ul>
+<h3 id="bandas">Bandas</h3>
+<p>Bandas são camadas de valores por pixel.</p>
+<p>No projeto:</p>
+<ul>
+<li>satélite: 3 bandas RGB;</li>
+<li>máscara segmentada: 1 banda com ID de classe.</li>
+</ul>
+<p>Essa diferença é relevante porque algoritmos de visão computacional geralmente consomem imagem e máscara com estruturas diferentes.</p>
+<h3 id="concorrencia-assincrona">Concorrência Assíncrona</h3>
+<p>O pipeline <code>2019-2020</code> usa async porque é limitado por rede. Enquanto uma requisição WMS aguarda resposta, outra pode ser executada.</p>
+<p>Impacto:</p>
+<ul>
+<li>reduz tempo total de download;</li>
+<li>mantém controle de carga com semáforo;</li>
+<li>evita criar excesso de threads.</li>
+</ul>
+<h3 id="cache">Cache</h3>
+<p>O projeto usa cache simples em memória para:</p>
+<ul>
+<li>conexão WMS;</li>
+<li>transformadores de coordenadas.</li>
+</ul>
+<p>Exemplo:</p>
+<pre><code class="language-python">if srid_entrada not in _transformador_cache:
+    _transformador_cache[srid_entrada] = Transformer.from_crs(...)</code></pre>
+<p>Impacto:</p>
+<ul>
+<li>menos overhead por amostra;</li>
+<li>código mais eficiente em lotes grandes.</li>
+</ul>
+<h3 id="tiles">Tiles</h3>
+<p>Tiles não são usados diretamente. O projeto solicita imagens completas por BBOX usando WMS <code>GetMap</code>.</p>
+<p>Trade-off:</p>
+<ul>
+<li>mais simples de implementar;</li>
+<li>cada amostra vira uma chamada direta por recorte;</li>
+<li>menos controle fino sobre cache espacial quando comparado a tiles XYZ/WMTS.</li>
+</ul>
+<h3 id="stac">STAC</h3>
+<p>STAC não é usado. Não há busca por cenas, assets, datas ou coleções em catálogo STAC.</p>
+<p>O acesso aos dados é direto:</p>
+<ul>
+<li>WMS para imagens renderizadas;</li>
+<li>URL fixa para shapefile 2012.</li>
+</ul>
+<h3 id="ndvi">NDVI</h3>
+<p>NDVI não é calculado. O projeto não trabalha com bandas NIR/vermelho separadas nem com índices espectrais.</p>
+<p>As imagens de satélite baixadas via WMS já vêm renderizadas como RGB.</p>
+<h2 id="decisoes-tecnicas">Decisões Técnicas</h2>
+<h3 id="uso-de-wms-em-vez-de-download-bruto-de-cenas">Uso de WMS em vez de download bruto de cenas</h3>
+<p>O projeto usa WMS porque o objetivo é obter recortes prontos e georreferenciados por área, não processar cenas orbitais completas.</p>
+<p>Vantagens:</p>
+<ul>
+<li>integração simples;</li>
+<li>recorte direto por BBOX;</li>
+<li>menor volume de dados;</li>
+<li>não exige catálogo de cenas.</li>
+</ul>
+<p>Limitações:</p>
+<ul>
+<li>depende da disponibilidade do servidor WMS;</li>
+<li>retorna imagem renderizada, não bandas científicas brutas;</li>
+<li>estilo/cor do servidor pode afetar a conversão RGB para ID.</li>
+</ul>
+<h3 id="mascaras-de-1-banda-em-vez-de-rgb">Máscaras de 1 banda em vez de RGB</h3>
+<p>A branch <code>extrator-sem-rgb.py</code> muda a representação de uso do solo para IDs.</p>
+<p>Vantagens:</p>
+<ul>
+<li>formato mais adequado para segmentação semântica;</li>
+<li>classes ficam explícitas numericamente;</li>
+<li>reduz ambiguidade em comparação com cores;</li>
+<li>aproxima os outputs de 2012 e 2020.</li>
+</ul>
+<p>Trade-off:</p>
+<ul>
+<li>a conversão 2019-2020 depende das cores exatas retornadas pelo WMS;</li>
+<li>mudanças de estilo no servidor podem quebrar o mapeamento;</li>
+<li>visualização humana direta fica menos intuitiva.</li>
+</ul>
+<h3 id="shapefile-local-para-2012-2015">Shapefile local para 2012-2015</h3>
+<p>O uso do solo <code>2012-2015</code> é produzido por rasterização local do shapefile, em vez de WMS.</p>
+<p>Vantagens:</p>
+<ul>
+<li>maior controle sobre IDs de classe;</li>
+<li>saída consistente com o recorte;</li>
+<li>não depende de estilo WMS para a máscara.</li>
+</ul>
+<p>Limitações:</p>
+<ul>
+<li>download inicial grande;</li>
+<li>processamento mais pesado em CPU/memória;</li>
+<li>depende da estrutura de colunas do shapefile.</li>
+</ul>
+<h3 id="geotiff-como-formato-de-saida">GeoTIFF como formato de saída</h3>
+<p>GeoTIFF foi escolhido porque carrega pixels e georreferenciamento no mesmo arquivo.</p>
+<p>Vantagens:</p>
+<ul>
+<li>compatível com GIS;</li>
+<li>preserva CRS e transformada;</li>
+<li>adequado para pipelines raster e machine learning geoespacial.</li>
+</ul>
+<p>Trade-off:</p>
+<ul>
+<li>arquivos maiores que PNG/JPEG;</li>
+<li>requer bibliotecas geoespaciais para manipulação correta.</li>
+</ul>
+<h3 id="gui-desktop-e-execucao-via-cliscript">GUI desktop e execução via CLI/script</h3>
+<p>A GUI facilita operação manual por usuários que precisam selecionar arquivos e pastas. Ao mesmo tempo, os pipelines principais estão implementados como funções Python (<code>processar_ano_2012</code> e <code>processar_ano_2019_2020</code>), então a lógica não depende exclusivamente da interface gráfica e pode ser acionada via terminal/script.</p>
+<p>Na arquitetura, a GUI atua como camada de entrada e orquestração visual. A execução real fica nas funções de processamento.</p>
+<p>Trade-off:</p>
+<ul>
+<li>mantém uma interface simples para uso manual;</li>
+<li>permite reaproveitar a lógica em execução por terminal/script;</li>
+<li>ainda concentra interface e orquestração no mesmo arquivo.</li>
+</ul>
+<h2 id="resumo-tecnico">Resumo Técnico</h2>
+<p>O sistema é um pipeline Python operável por interface desktop e por execução via terminal/script, que transforma coordenadas tabulares em um dataset geoespacial raster. A arquitetura combina WMS para imagens renderizadas, GeoPandas para dados vetoriais, RasterIO para persistência georreferenciada e asyncio para acelerar downloads.</p>
+<p>A principal decisão técnica da branch é representar uso do solo como máscara categórica de 1 banda. Isso torna o dataset mais adequado para processamento computacional, mas exige cuidado com a conversão das cores do WMS e com módulos herdados da versão RGB.</p>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
