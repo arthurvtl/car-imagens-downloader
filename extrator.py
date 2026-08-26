@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import shutil
+import sys
 import threading
 import time
 import tkinter as tk
@@ -1078,12 +1079,15 @@ class AplicacaoGUI:
 
 
 def main_gui() -> None:
-    """Função de entrada da aplicação GUI."""
-    root = tk.Tk()
-    AplicacaoGUI(root)
-    root.mainloop()
+    """Abre a nova interface CBERS."""
+    from interface_tk import main
+
+    main()
 
 
 if __name__ == "__main__":
-    main_gui()
+    if len(sys.argv) > 1:
+        from cli import main
 
+        raise SystemExit(main(sys.argv[1:]))
+    main_gui()

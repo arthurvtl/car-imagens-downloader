@@ -8,3 +8,6 @@ __pycache__/
 .env
 .DS_Store
 .vscode/
+.ipynb_checkpoints/
+IMAGENS*/
+imagens/NIR/

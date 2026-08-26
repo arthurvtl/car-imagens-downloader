@@ -1,5 +1,17 @@
 # IntegraCar -- Pipeline de Extracao de Imagens
 
+> A versao atual inclui extracao CBERS NIR e RGB por STAC/COG, com CLI e
+> interface Tkinter. Consulte [README-CBERS.md](README-CBERS.md).
+
+Uso rapido:
+
+```bash
+python interface_tk.py
+python cli.py --help
+```
+
+O codigo GeoBases 2012-2015 e 2019-2020 abaixo foi preservado como legado.
+
 Pipeline automatizado que baixa imagens de satelite e mapas de uso do solo do
 **GeoBases do Espirito Santo** para propriedades rurais cadastradas no CAR
 (Cadastro Ambiental Rural).
